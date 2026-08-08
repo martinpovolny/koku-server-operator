@@ -101,7 +101,8 @@ func IngressDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.De
 		// Auth: JWT is handled by the Envoy gateway; trust the injected header.
 		EnvVal("INGRESS_AUTH", "true"),
 		EnvVal("INGRESS_LOGLEVEL", "INFO"),
-		EnvVal("SSL_CERT_FILE", "/etc/ssl/certs/ca-bundle/ca-bundle.crt"),
+		// Matches KokuVolumeMounts + combine-ca.sh output path.
+		EnvVal("SSL_CERT_FILE", "/etc/pki/ca-trust/combined/ca-bundle.crt"),
 	}
 	// Kafka SASL
 	if cfg.Spec.Kafka.SASL.Mechanism != "" {
@@ -180,28 +181,21 @@ func IngressService(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.Servi
 }
 
 func ingressVolumes(cfg *costv1alpha1.CostManagementServiceConfig) ([]corev1.Volume, []corev1.VolumeMount) {
-	vols := []corev1.Volume{
-		{
-			Name: "aws-config",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: NameAWSConfigMap(cfg)},
-				},
-			},
-		},
-		{
-			Name:         "ca-bundle",
-			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-		},
-	}
-	mounts := []corev1.VolumeMount{
-		{Name: "aws-config", MountPath: "/etc/aws", ReadOnly: true},
-		{Name: "ca-bundle", MountPath: "/etc/ssl/certs/ca-bundle", ReadOnly: true},
-	}
-	// Optional Kafka TLS CA cert
+	// CACombineInitContainer needs ca-scripts / ca-source / combined-ca-bundle.
+	vols := KokuVolumes(cfg)
+	mounts := KokuVolumeMounts(cfg)
 	if v, m := kafkaTLSVolumeAndMount(cfg); v != nil {
-		vols = append(vols, *v)
-		mounts = append(mounts, *m)
+		found := false
+		for _, existing := range vols {
+			if existing.Name == v.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			vols = append(vols, *v)
+			mounts = append(mounts, *m)
+		}
 	}
 	return vols, mounts
 }
