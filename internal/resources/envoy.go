@@ -290,17 +290,33 @@ func envoyVolumes(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.Volume
 	return vols
 }
 
+// yamlScalar returns a YAML-safe representation of s for inline embedding.
+// The injection risk is embedded newlines — they break out of the current
+// scalar and allow the remainder to be parsed as new YAML structure.
+// Any string containing a newline or carriage return is double-quoted using
+// strconv.Quote, which escapes control characters as \n, \r, etc.
+// Plain scalars (URLs, identifiers) that contain no control characters are
+// returned as-is; they are valid YAML without quoting.
+func yamlScalar(s string) string {
+	for _, c := range s {
+		if c == '\n' || c == '\r' || c == '\x00' {
+			return strconv.Quote(s)
+		}
+	}
+	return s
+}
+
 // EnvoyYAML renders the Envoy static config from the CR (ported from the Helm chart).
 // Uses token replacement (not fmt.Sprintf) so Lua source with %s is left intact.
 func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
-	issuer := KeycloakIssuerURL(cfg)
+	issuer := yamlScalar(KeycloakIssuerURL(cfg))
 	jwks := KeycloakJWKSURL(cfg)
 	kcHost, kcPort, useTLS := keycloakHostPort(cfg)
 
 	var audYAML strings.Builder
 	for _, a := range KeycloakAudiences(cfg) {
 		audYAML.WriteString("                        - ")
-		audYAML.WriteString(a)
+		audYAML.WriteString(yamlScalar(a))
 		audYAML.WriteByte('\n')
 	}
 

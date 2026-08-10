@@ -239,3 +239,43 @@ func TestEnvoyDeploymentMountsKeycloakCACert(t *testing.T) {
 			"Envoy will fail to verify Keycloak Route certificates", "my-router-ca")
 	}
 }
+
+// TestEnvoyYAMLRejectsInjectedAudience verifies that audience values containing
+// embedded newlines cannot inject YAML structure into Envoy's JWT filter config.
+// Without escaping, a newline breaks out of the audience list and the injected
+// content becomes new YAML keys — which could override the remote_jwks endpoint
+// and route token validation to an attacker-controlled server.
+//
+// Best practice is structural YAML generation (not string templates); this test
+// guards the current escape-at-interpolation approach as defense-in-depth.
+func TestEnvoyYAMLRejectsInjectedAudience(t *testing.T) {
+	cfg := testCfg()
+	// Payload: embedded newline followed by a "remote_jwks:" key that would
+	// override the JWKS endpoint if injected as a bare YAML line.
+	cfg.Spec.Auth.Keycloak.Audiences = []string{
+		"legit-audience",
+		"evil\nremote_jwks:\n  http_uri:\n    uri: http://attacker.example.com/jwks",
+	}
+
+	out := EnvoyYAML(cfg)
+
+	// After the fix the injected string is quoted as a YAML scalar — the
+	// newline is escaped as \n so "remote_jwks:" never appears as a bare key.
+	// The URL may appear inside a quoted scalar value, which is safe.
+	if strings.Contains(out, "\nremote_jwks:") {
+		t.Error("audience injection succeeded: bare 'remote_jwks:' key injected into Envoy YAML")
+	}
+}
+
+// TestEnvoyYAMLRejectsInjectedIssuer verifies the issuer URL is YAML-escaped.
+// A newline in issuerURL injects structure into the JWT provider config block.
+func TestEnvoyYAMLRejectsInjectedIssuer(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.IssuerURL = "https://legit.example.com\nremote_jwks:\n  http_uri:\n    uri: http://attacker.example.com/jwks"
+
+	out := EnvoyYAML(cfg)
+
+	if strings.Contains(out, "\nremote_jwks:") {
+		t.Error("issuer injection succeeded: bare 'remote_jwks:' key injected into Envoy YAML")
+	}
+}
