@@ -1,134 +1,16 @@
+# ClusterRole: contains ONLY truly cluster-scoped resources.
+# Namespace-scoped resources (Secrets, Jobs, Deployments, etc.) are in
+# namespace_role.yaml, bound via a namespaced RoleBinding so the operator
+# cannot read or write those resources outside its own namespace.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: manager-role
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  - persistentvolumeclaims
-  - secrets
-  - serviceaccounts
-  - services
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  - statefulsets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - batch
-  resources:
-  - cronjobs
-  - jobs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - config.openshift.io
-  resources:
-  - ingresses
-  verbs:
-  - get
-- apiGroups:
-  - console.openshift.io
-  resources:
-  - consolelinks
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - prometheusrules
-  - servicemonitors
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - networking.k8s.io
-  resources:
-  - networkpolicies
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - clusterrolebindings
-  - clusterroles
-  - rolebindings
-  - roles
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - route.openshift.io
-  resources:
-  - routes
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - route.openshift.io
-  resources:
-  - routes/custom-host
-  verbs:
-  - create
+# Operator's own CRD — Namespaced resource but listed in ClusterRole so the
+# controller can watch it in its restricted namespace without needing a
+# separate Role per possible namespace.
 - apiGroups:
   - service.costmanagement.openshift.io
   resources:
@@ -155,6 +37,14 @@ rules:
   - get
   - patch
   - update
+# Cluster-scoped: OpenShift cluster config (discovery phase).
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+# Cluster-scoped: default StorageClass detection (discovery phase).
 - apiGroups:
   - storage.k8s.io
   resources:
@@ -162,3 +52,30 @@ rules:
   verbs:
   - get
   - list
+# Cluster-scoped: ConsoleLink for Application Menu entry.
+- apiGroups:
+  - console.openshift.io
+  resources:
+  - consolelinks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Cluster-scoped: Kruize ClusterRole + ClusterRoleBinding (workload monitoring).
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  - clusterrolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
