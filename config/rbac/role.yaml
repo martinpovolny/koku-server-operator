@@ -66,6 +66,8 @@ rules:
   - update
   - watch
 # Cluster-scoped: Kruize ClusterRole + ClusterRoleBinding (workload monitoring).
+# list/watch are omitted: the operator uses server-side apply (Patch) to
+# reconcile these resources, and Get is sufficient for the deletion path.
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -75,7 +77,5 @@ rules:
   - create
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
