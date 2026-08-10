@@ -4,16 +4,16 @@ Full-repository review of `koku-service-operator` at commit `15c7b1d` by Codex.
 
 ## Executive summary
 
-Six actionable issues were found:
+Six actionable issues were found. **All six have been fixed** (commits on `main`):
 
-| ID | Priority | Area | Impact |
+| ID | Priority | Area | Status |
 |---|---|---|---|
-| F1 | P1 | Cluster-scoped ownership | Separate installations can overwrite and delete each other's resources |
-| F2 | P1 | Status/error handling | Failed reconciliation can retain `Available=True` and never become degraded |
-| F3 | P2 | Object storage validation | Missing S3 credentials can still result in a Ready installation |
-| F4 | P2 | OIDC validation | HTTP 401/404 responses are accepted as a healthy JWKS endpoint |
-| F5 | P2 | Monitoring reconciliation | Requested monitoring resources can fail while reconciliation reports success |
-| F6 | P2 | Event handling | A Ready event is emitted on every successful reconciliation |
+| F1 | P1 | Cluster-scoped ownership | ✅ Fixed — ClusterRole name includes `sha256(namespace)[:4]` |
+| F2 | P1 | Status/error handling | ✅ Fixed — any phase error now sets `Degraded=True` |
+| F3 | P2 | Object storage validation | ✅ Fixed — `checkSecretKeys` called in validation stage |
+| F4 | P2 | OIDC validation | ✅ Fixed — probe fails on any non-2xx response |
+| F5 | P2 | Monitoring reconciliation | ✅ Fixed — non-CRD errors are returned, not swallowed |
+| F6 | P2 | Event handling | ✅ Fixed — `priorPhase` captured before overwrite |
 
 F1 and F2 should be addressed before supporting more than one custom resource
 or relying on status conditions for automation. F3 and F4 directly affect
@@ -21,7 +21,7 @@ whether a nominally Ready installation is usable.
 
 ## Findings
 
-### F1 — Cluster-scoped resources collide across namespaces (P1)
+### F1 — Cluster-scoped resources collide across namespaces (P1) ✅ FIXED
 
 **Locations**
 
@@ -63,7 +63,7 @@ needed by the other CR.
 4. Add a test reconciling two same-named CRs in different namespaces and assert
    distinct object names, subjects, and deletion behavior.
 
-### F2 — Ordinary reconciliation errors do not set degraded status (P1)
+### F2 — Ordinary reconciliation errors do not set degraded status (P1) ✅ FIXED
 
 **Locations**
 
@@ -107,7 +107,7 @@ Add a table-driven test for errors from discovery, apply, readiness lookup,
 migration, and monitoring. Assert the complete top-level condition set rather
 than only `status.phase`.
 
-### F3 — User-provided S3 credentials are trusted without validation (P2)
+### F3 — User-provided S3 credentials are trusted without validation (P2) ✅ FIXED
 
 **Locations**
 
@@ -138,7 +138,7 @@ but not for an explicit credential reference.
 Tests should cover a missing Secret, each missing key, empty values, and a valid
 Secret.
 
-### F4 — OIDC/JWKS validation accepts HTTP error responses (P2)
+### F4 — OIDC/JWKS validation accepts HTTP error responses (P2) ✅ FIXED
 
 **Location**
 
@@ -166,7 +166,7 @@ response body size, decode the JSON, and verify a non-empty JWKS `keys` array.
 Tests should cover 200 with valid JWKS, 200 with invalid JSON, 200 with an empty
 key set, redirects, 401, 404, 500, timeout, and parent-context cancellation.
 
-### F5 — Monitoring apply failures are logged and discarded (P2)
+### F5 — Monitoring apply failures are logged and discarded (P2) ✅ FIXED
 
 **Location**
 
@@ -198,7 +198,7 @@ through normal phase error handling. If monitoring must remain best-effort,
 introduce a `MonitoringReady` condition and set it false for real failures so
 the failure is visible without log access.
 
-### F6 — Ready events are emitted on every successful pass (P2)
+### F6 — Ready events are emitted on every successful pass (P2) ✅ FIXED
 
 **Location**
 
