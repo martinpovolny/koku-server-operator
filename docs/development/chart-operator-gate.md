@@ -51,3 +51,7 @@ When a new operator stage goes green on clusterbot/CRC, add
 `@pytest.mark.operator` on the chart branch and bump `CHART_REF` if needed.
 Do not mark flaky tests; keep exclusions documented in
 `cost-onprem-chart/docs/development/operator-test-compat.md`.
+
+## See also
+
+See also: [operator-chart-testing.md](operator-chart-testing.md) for the full CRC/clusterbot runtime testing guide.
