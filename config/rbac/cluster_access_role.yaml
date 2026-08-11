@@ -1,0 +1,26 @@
+# Minimal ClusterRole for resources that are genuinely cluster-scoped.
+# Bound via cluster_access_role_binding.yaml (ClusterRoleBinding).
+# Namespace-scoped resources are NOT listed here — they are covered by
+# manager-role bound via the namespaced RoleBinding in role_binding.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-cluster-role
+rules:
+# Discovery phase: detect cluster domain and default StorageClass.
+- apiGroups: [config.openshift.io]
+  resources: [ingresses]
+  verbs: [get]
+- apiGroups: [storage.k8s.io]
+  resources: [storageclasses]
+  verbs: [get, list]
+# UI: ConsoleLink in the Application Menu.
+- apiGroups: [console.openshift.io]
+  resources: [consolelinks]
+  verbs: [create, delete, get, patch, update]
+# Kruize workload monitoring ClusterRole/Binding.
+# list/watch omitted: server-side apply (Patch) is used for reconciliation;
+# Get is sufficient for the deletion path.
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [clusterroles, clusterrolebindings]
+  verbs: [create, delete, get, patch, update]
