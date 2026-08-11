@@ -1,112 +1,122 @@
-# Clusterbot smoke — 2026-08-10 (resume notes)
+# Clusterbot smoke — 2026-08-10 / 2026-08-11
 
-Smoke of **upstream `main` @ `7908c48`** on OpenShift clusterbot, then fixes on
-branch `fix/clusterbot-kruize-rbac-ingress`. Cluster was expected to shut down
-within hours — use this to continue on a fresh clusterbot tomorrow.
+Smoke of branch `fix/clusterbot-kruize-rbac-ingress` (from upstream `main` @
+`7908c48`) on OpenShift clusterbot. Draft PR:
+https://github.com/project-koku/koku-service-operator/pull/17
 
-## What was deployed
+## 2026-08-11 status (current cluster) — SUCCESS
+
+Context: `clusterbot` →
+`api.chat-bot-krm93-3ftzcr.crt-mce-aws.devcluster.openshift.com`
 
 | Piece | Namespace | Notes |
 |-------|-----------|--------|
-| Operator image | `koku-service-operator-system` | `quay.io/martin_povolny/koku-server-operator:fix-7908c48` (also `:dev`) |
+| Operator | `koku-service-operator-system` | `quay.io/martin_povolny/koku-server-operator:fix-clusterbot-20260811` |
 | CMSC `cost-management` | `cost-onprem` | Bundled DB/cache; MinIO + AMQ Streams BYOI |
-| MinIO | `cost-byoi-infra` | Storage secret `cost-management-storage-credentials` |
-| Kafka | `kafka` | `./config/samples/byoi/deploy-kafka.sh` (`STORAGE_CLASS=gp3-csi`) |
-| RHBK | `keycloak` | Chart `scripts/deploy-rhbk.sh` — **completed** before handoff |
-| UI OAuth secret | `cost-onprem` | Stub first; real mirror from Keycloak **not confirmed** after interrupt |
+| MinIO | `cost-byoi-infra` | Secret `cost-management-storage-credentials` |
+| Kafka | `kafka` | `STORAGE_CLASS=gp3-csi ./config/samples/byoi/deploy-kafka.sh` |
+| RHBK | `keycloak` | `cost-onprem-chart/scripts/deploy-rhbk.sh` — completed |
+| UI OAuth | `cost-onprem` | Mirrored via `mirror-ui-oauth-secret.sh --force` |
 
-Last known CMSC state (before Keycloak wiring finished):
+Verified:
 
-- `phase=Ready`, `Available=True`, `UIReady=True` (secret present)
-- All app Deployments **1/1** except UI (`oauth-proxy` CrashLoop — no Keycloak DNS at that time)
-- Routes: API + UI present
+- CMSC `phase=Ready`, `Available=True`, `UIReady=True`, `AuthenticationReady=True`, `SchemaUpToDate=True`
+- UI pod **2/2** Ready; UI Route **302 → Keycloak** login
+- API Route (gateway host) **401** without JWT (Envoy JWT gate working)
+- Kruize `ClusterRole/cost-management-kruize` created (RBAC fix validated)
+- Ingress image `quay.io/iop/ingress:master` (default / sample)
 
-Public Keycloak URL from RHBK script:
+URLs:
 
-`https://keycloak-keycloak.apps.chat-bot-wqsg6-65d66e.crt-mce-aws.devcluster.openshift.com`
+- UI: `https://cost-management-ui-cost-onprem.apps.chat-bot-krm93-3ftzcr.crt-mce-aws.devcluster.openshift.com`
+- API: `https://cost-management-gateway-cost-onprem.apps.chat-bot-krm93-3ftzcr.crt-mce-aws.devcluster.openshift.com/api`
+- Keycloak: `https://keycloak-keycloak.apps.chat-bot-krm93-3ftzcr.crt-mce-aws.devcluster.openshift.com`
 
-UI URL:
+Auth patch applied on CMSC:
 
-`https://cost-management-ui-cost-onprem.apps.chat-bot-wqsg6-65d66e.crt-mce-aws.devcluster.openshift.com`
+```yaml
+spec:
+  auth:
+    keycloak:
+      url: http://keycloak-service.keycloak.svc.cluster.local:8080
+      issuerURL: https://keycloak-keycloak.apps.chat-bot-krm93-3ftzcr.crt-mce-aws.devcluster.openshift.com
+      realm: kubernetes
+      tls:
+        insecureSkipVerify: true
+```
 
 ## Fixes in this PR (code)
 
 1. **Kruize ClusterRole escalate** — manager SA could not create `{cr}-kruize`
-   ClusterRole (missing held permissions for pods/nodes/endpoints/metrics/…).
-   Added kubebuilder RBAC markers → `config/rbac/role.yaml`.
-2. **Empty ingress image** — omitted `spec.ingress.image` produced `:` /
-   `InvalidImageName`. Default to `quay.io/iop/ingress:master` (chart parity);
-   samples updated; unit tests added.
+   ClusterRole. Kubebuilder RBAC markers → `config/rbac/role.yaml`.
+2. **Empty ingress image** — default to `quay.io/iop/ingress:master`; samples + unit tests.
+3. **Sample polish** — amd64 koku tag; oauth2-proxy on `registry.redhat.io`.
 
-## Findings / gaps (not all fixed in code)
+## Findings / gaps
 
 | Severity | Finding | Status |
 |----------|---------|--------|
 | **Blocker** | Manager cannot create Kruize ClusterRole (RBAC escalate) | **Fixed in PR** |
 | **Blocker** | Empty ingress image → InvalidImageName | **Fixed in PR** |
-| **High** | Sample `ui.oauthProxy.image` uses `registry.access.redhat.com/...` — clusterbot requires `registry.redhat.io/...` (terms) | **Should fix in PR samples** |
-| **High** | Bundled sample `quay.io/martin_povolny/koku:latest` is **arm64-only** — migrate ImagePullBackOff on amd64 clusterbot | Doc / sample: use `cost-mgmt-dev-tenant/koku:d8055ac` on amd64 |
-| **Expected BYOI** | RHBK not created by operator — need `deploy-rhbk.sh` | Deployed on this cluster; redo on next |
-| **Expected BYOI** | UI OAuth Secret must be mirrored (`mirror-ui-oauth-secret.sh --force`) | Script exists; re-run after RHBK |
-| **Config** | Set `spec.auth.keycloak.issuerURL` to public RHBK Route when `iss` ≠ in-cluster URL | Not applied after RHBK (interrupted) |
-| **Ops** | `make deploy` OpenAPI validate can timeout on clusterbot — use `--validate=false` | Workaround only |
+| **High** | Sample oauth2-proxy on `registry.access.redhat.com` fails ToS pulls | **Fixed in PR samples** |
+| **High** | `quay.io/martin_povolny/koku:latest` arm64-only on amd64 clusterbot | **Sample → cost-mgmt-dev-tenant/koku:d8055ac** |
+| **Ops** | Bundled PostgreSQL STS uses **default** SA + `fsGroup: 26` → needs `oc adm policy add-scc-to-user anyuid -z default -n cost-onprem` (koku SA alone is not enough) | Document / consider SA on DB STS |
 | **Ops** | Grant `anyuid` (+ often `privileged`) to `{cr}-koku` SA for migrate Jobs | Manual each cluster |
-| **Cleanup** | Stale UI ReplicaSet pods can linger after image patches | Delete old pods / RS |
+| **Expected BYOI** | RHBK + mirror UI OAuth Secret | Scripts; not operator-owned |
+| **Config** | Set `issuerURL` to public RHBK Route when `iss` ≠ in-cluster URL | Required for JWT |
+| **Ops** | `make deploy` OpenAPI validate can timeout — `--validate=false` | Workaround |
+| **Note** | API Route hostname is `{cr}-gateway-{ns}.apps...` (not `…-api-…`) | Use `oc get route` |
 
-## Resume checklist (new clusterbot tomorrow)
+## Resume checklist (new clusterbot)
 
 ```bash
-# 0. Context
-kubectl config use-context <new-clusterbot>
+kubectl config use-context clusterbot   # or new context
 
-# 1. Operator (from this branch or rebuilt image)
-cd .worktrees/fix-clusterbot-kruize-ingress   # or checkout the PR branch
-export IMG=quay.io/martin_povolny/koku-server-operator:dev   # rebuild/push if needed
-KUSTOMIZE=../../bin/kustomize   # or make kustomize
-(cd config/manager && $KUSTOMIZE edit set image controller=$IMG)
-$KUSTOMIZE build config/default | kubectl apply --validate=false --server-side --force-conflicts -f -
+cd .worktrees/fix-clusterbot-kruize-ingress
+export IMG=quay.io/martin_povolny/koku-server-operator:fix-clusterbot-20260811
+# rebuild/push if needed; then:
+(cd config/manager && ../../bin/kustomize edit set image controller=$IMG)
+./bin/kustomize build config/default | kubectl apply --validate=false --server-side --force-conflicts -f -
 
-# 2. Infra BYOI
 STORAGE_CLASS=gp3-csi LOG_LEVEL=INFO ./config/samples/byoi/deploy-kafka.sh
-# MinIO: kubectl apply -f config/samples/byoi/infra/{namespace,serviceaccount,credentials,minio}.yaml
-# + storage secret in cost-onprem (access-key/secret-key)
 
-# 3. RHBK
-cd ../cost-onprem-chart   # sibling checkout
+# MinIO (+ SA anyuid)
+kubectl apply -f config/samples/byoi/infra/{namespace,serviceaccount,credentials,minio}.yaml
+oc adm policy add-scc-to-user anyuid -z byoi-infra -n cost-byoi-infra
+kubectl create ns cost-onprem --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n cost-onprem create secret generic cost-management-storage-credentials \
+  --from-literal=access-key=byoi-minio-access \
+  --from-literal=secret-key=byoi-minio-secret-key \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Apply CMSC (patch clusterDomain, gp3-csi, MinIO objectStorage, amd64 UI image)
+# Then:
+oc adm policy add-scc-to-user anyuid -z default -n cost-onprem
+oc adm policy add-scc-to-user anyuid -z cost-management-koku -n cost-onprem
+
+DOMAIN=$(kubectl get ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')
+cd ../cost-onprem-chart
 STORAGE_CLASS=gp3-csi LOG_LEVEL=INFO \
   COST_MGMT_NAMESPACE=cost-onprem \
   COST_MGMT_RELEASE_NAME=cost-management \
-  COST_MGMT_UI_BASE_URL="https://cost-management-ui-cost-onprem.apps.<DOMAIN>" \
+  COST_MGMT_UI_BASE_URL="https://cost-management-ui-cost-onprem.${DOMAIN}" \
   ./scripts/deploy-rhbk.sh
 
-# 4. Mirror UI OAuth + wire CR
+cd - >/dev/null
 NAMESPACE=cost-onprem CR_NAME=cost-management \
   ./config/samples/byoi/mirror-ui-oauth-secret.sh --force
+# Patch auth.keycloak.url + issuerURL as above
 
-# Patch CMSC (example fields):
-# - global.clusterDomain / storageClass=gp3-csi
-# - objectStorage → MinIO
-# - costManagement.api/masu image → amd64 koku tag
-# - ui.oauthProxy.image → registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0
-# - auth.keycloak.url → http://keycloak-service.keycloak.svc.cluster.local:8080 (confirm svc name)
-# - auth.keycloak.issuerURL → https://keycloak-keycloak.apps.<DOMAIN>
-# - auth.keycloak.tls.insecureSkipVerify: true (lab) or caCertSecretName
-
-oc adm policy add-scc-to-user anyuid -z cost-management-koku -n cost-onprem
-
-# 5. Verify
-kubectl -n cost-onprem get cmsc cost-management -o yaml | less
-kubectl -n cost-onprem get deploy,pods
-kubectl -n cost-onprem logs deploy/cost-management-ui -c oauth-proxy --tail=50
+kubectl -n cost-onprem get cmsc,deploy,pods,route
 ```
 
-## Success criteria for “everything working”
+## Success criteria
 
-- [ ] CMSC `phase=Ready`, `Available=True`, `UIReady=True`, no `Degraded`
-- [ ] UI pod **2/2** Ready (oauth-proxy + app)
-- [ ] Browser login via UI Route against RHBK
-- [ ] API Route `/api` accepts JWT from Keycloak (not only gateway Ready)
-- [ ] No ImagePullBackOff / InvalidImageName
+- [x] CMSC `phase=Ready`, `Available=True`, `UIReady=True`, no `Degraded`
+- [x] UI pod **2/2** Ready; browser login redirect to RHBK
+- [x] API Route returns **401** without JWT (gateway up)
+- [x] No ImagePullBackOff / InvalidImageName for ingress / koku
+- [ ] Full browser login + authenticated `/api` call (manual)
 
 ## Related
 
