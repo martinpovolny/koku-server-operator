@@ -5,6 +5,33 @@ Three independent audits covered controller lifecycle, Kubernetes resource
 construction/security, and API/delivery behavior. This report contains only
 new findings beyond `docs/code-review-2026-08-10.md`.
 
+## Fix status (as of 2026-08-10)
+
+| ID | Status | Notes |
+|----|--------|-------|
+| D1 | ❌ OPEN | Readiness gate on all workloads |
+| D2 | ❌ OPEN | Status hot loop / generation predicate |
+| D3 | ❌ OPEN | AuthenticationReady overwritten by edge stage |
+| D4 | ❌ OPEN | Migration fingerprint incomplete |
+| D5 | ✅ FIXED | Multi-broker Kafka host parsing |
+| D6 | ✅ FIXED | ROS API NetworkPolicy added |
+| D7 | ✅ FIXED | Kruize secrets access removed from ClusterRole |
+| D8 | ✅ FIXED | CronJob deleted when feature is disabled |
+| D9 | ✅ FIXED | External DB secret not silently created |
+| D10 | ❌ OPEN | Sample kustomization duplicate GVK |
+| D11 | ✅ FIXED | Keycloak CA Secret mounted into Envoy |
+| D12 | ❌ OPEN | ServiceAccount create=false ignored |
+| D13 | ❌ OPEN | API controls (profile=ha, enabled fields) no effect |
+| D14 | ❌ OPEN | Rollout readiness ignores observedGeneration |
+| D15 | ✅ FIXED | Kruize credentials added to DB validation |
+| D16 | ❌ OPEN | imagePullSecrets not propagated |
+| D17 | ⚠️ PARTIAL | ServiceMonitor labels fixed; port names/Listener Service open |
+| D18 | ✅ FIXED | RBAC cache port uses spec.cache.port |
+| D19 | ❌ OPEN | Route TLS passthrough/reencrypt accepted but broken |
+| D20 | ✅ FIXED | Envoy config hash annotation triggers pod restart |
+| D21 | ❌ OPEN | StorageClass discovery blocks pure BYOI |
+| D22 | ❌ OPEN | Long CR names produce invalid child resources |
+
 ## Executive summary
 
 The deeper pass found 22 additional issues. The most urgent are:
@@ -92,7 +119,7 @@ bootstrap input changes have the same incomplete-cache problem.
 desired migration input: complete image reference, database target and Secret
 identity, migration command, and bootstrap inputs.
 
-### D5 — Multi-broker Kafka configuration produces an invalid host
+### D5 — Multi-broker Kafka configuration produces an invalid host — ✅ FIXED — `firstBroker()` parses first entry before extracting host:port
 
 **Locations:** `internal/resources/names.go:123-143`,
 `internal/resources/ros.go:69-86` and `:161-173`,
@@ -114,7 +141,7 @@ the comma-separated list.
 individual endpoints, and pass the complete bootstrap list to clients that
 support it.
 
-### D6 — ROS API bypasses the JWT gateway
+### D6 — ROS API bypasses the JWT gateway — ✅ FIXED — `ROSAPINetworkPolicy` added, allows only gateway pods on port 8000
 
 **Locations:** `internal/resources/ros.go:242-335`,
 `internal/controller/costmanagementserviceconfig_controller.go:541-552`, and
@@ -129,7 +156,7 @@ path.
 **Recommendation:** add a ROS policy permitting API traffic only from gateway
 pods and metrics traffic only from the intended monitoring namespaces.
 
-### D7 — Kruize can read every Secret in the cluster
+### D7 — Kruize can read every Secret in the cluster — ✅ FIXED — `secrets` removed from Kruize ClusterRole
 
 **Location:** `internal/resources/kruize.go:49-84`.
 
@@ -142,7 +169,7 @@ namespace.
 can be demonstrated, and reduce other permissions to namespaced Roles or the
 narrowest resource set possible.
 
-### D8 — Disabling cleanup does not stop existing destructive CronJobs
+### D8 — Disabling cleanup does not stop existing destructive CronJobs — ✅ FIXED — `else` branch deletes CronJob when disabled
 
 **Locations:** `api/v1alpha1/costmanagementserviceconfig_types.go:352-360` and
 `:402-407`; `internal/controller/costmanagementserviceconfig_controller.go:465-473`.
@@ -158,7 +185,7 @@ but cleanup Jobs have the clearest data-lifecycle risk.
 **Recommendation:** explicitly delete owned optional resources when their
 desired state becomes disabled, and test true-to-false transitions.
 
-### D9 — A missing external database Secret is silently generated
+### D9 — A missing external database Secret is silently generated — ✅ FIXED — `ensureSecret` skipped when `database.secretName` is set
 
 **Locations:** `internal/controller/costmanagementserviceconfig_controller.go:175-179`,
 `internal/resources/names.go:34-39`, and `internal/resources/secrets.go:19-42`.
@@ -195,7 +222,7 @@ distinct identities, and add kustomize/bundle validation to CI.
 
 ## P2 findings
 
-### D11 — Keycloak TLS settings do not apply to Envoy
+### D11 — Keycloak TLS settings do not apply to Envoy — ✅ FIXED — `caCertSecretName` Secret mounted into Envoy via `envoyVolumes()`
 
 **Locations:** `api/v1alpha1/costmanagementserviceconfig_types.go:262-270`,
 `internal/resources/envoy.go:169-288`, and `internal/resources/ui.go:396-423`.
@@ -257,7 +284,7 @@ while a database rollout is still pending.
 rollout invariants (`UpdatedReplicas`, unavailable replicas, and StatefulSet
 revision equality).
 
-### D15 — External DB validation omits Kruize credentials
+### D15 — External DB validation omits Kruize credentials — ✅ FIXED — `kruize-user`/`kruize-password` added to required key list
 
 **Locations:** `api/v1alpha1/costmanagementserviceconfig_types.go:115-119`,
 `internal/controller/validation.go:45-52`, and
@@ -296,7 +323,7 @@ remain silent rather than firing.
 missing Listener Service, permit monitoring traffic, and test selectors against
 rendered Services and NetworkPolicies.
 
-### D18 — RBAC ignores the configured external cache port
+### D18 — RBAC ignores the configured external cache port — ✅ FIXED — `cachePortStr()` helper used instead of hardcoded 6379
 
 **Location:** `internal/resources/rbac.go:17-39`.
 
@@ -318,7 +345,7 @@ unusable.
 **Recommendation:** restrict validation to `edge` until a TLS backend listener
 and destination CA handling exist.
 
-### D20 — Envoy authentication configuration changes do not roll out pods
+### D20 — Envoy authentication configuration changes do not roll out pods — ✅ FIXED — `envoy-config-hash` annotation added to pod template
 
 **Locations:** `internal/resources/envoy.go:103-113`, `:137-253`, and `:255-305`.
 
@@ -364,11 +391,15 @@ collision-resistant name and label truncation.
 - Most resource tests inspect isolated object fragments rather than lifecycle
   transitions such as enable-to-disable, rollout, failure, and deletion.
 
-## Recommended implementation order
+## Recommended implementation order (remaining open items)
 
-1. Stop the status hot loop and make Ready reflect all critical workloads.
-2. Close the ROS gateway bypass and remove Kruize's Secret access.
-3. Correct migration identity and destructive-resource disable behavior.
-4. Fix Kafka parsing, external Secret handling, and authentication conditions.
-5. Repair bundle generation and add lifecycle/integration coverage.
-6. Implement or remove the remaining nonfunctional API controls.
+Items D5–D9, D11, D15, D18, D20 have been fixed. Remaining:
+
+1. **D2** — Stop the status hot loop (generation predicate on primary-resource watch).
+2. **D1** — Make Ready reflect all critical workload readiness conditions.
+3. **D3** — Prevent edge stage from overwriting a failed OIDC condition.
+4. **D4** — Correct migration identity (DB host + credential fingerprint).
+5. **D10** — Repair sample kustomization duplicate GVK; add bundle CI.
+6. **D13** — Implement or remove nonfunctional API controls (profile=ha, enabled fields).
+7. **D14** — Require observedGeneration in rollout readiness checks.
+8. **D12, D16, D17, D19, D21, D22** — Remaining correctness and API gaps.
