@@ -94,6 +94,7 @@ Full analysis in [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md).
 ## Reference material
 
 - [docs/development/crc-testing.md](docs/development/crc-testing.md) — local development and CRC testing guide
+- [docs/development/operator-chart-testing.md](docs/development/operator-chart-testing.md) — chart pytest operator gate (CRC/clusterbot)
 - [docs/tasks.md](docs/tasks.md) — implementation status per JIRA ticket
 - [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) — design decisions and best-practice analysis
 - [docs/design/security-context-strategy.md](docs/design/security-context-strategy.md) — OpenShift SCC strategy: why no runAsUser, restricted-v2 vs anyuid, comparison with Helm chart and SaaS

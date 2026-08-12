@@ -1,0 +1,117 @@
+# Operator acceptance gate from cost-onprem-chart (@pytest.mark.operator).
+#
+# Always: collect-only against the chart branch that carries the allowlist
+# (validates markers/harness on every PR — no cluster required).
+#
+# Optional e2e: when repository secret OPENSHIFT_KUBECONFIG is set, also run
+# the gate against a pre-provisioned OpenShift stack (operator + BYOI + CR).
+# Full ephemeral OCP CI (OLM + deps) remains COST-7699 / OpenShift CI.
+
+name: Chart Operator Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      chart_ref:
+        description: cost-onprem-chart git ref with @pytest.mark.operator
+        required: false
+        default: feat/operator-test-compat
+      run_e2e:
+        description: Run live e2e against OPENSHIFT_KUBECONFIG (true/false)
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+env:
+  CHART_REPO: https://github.com/martinpovolny/cost-onprem-chart.git
+  CHART_REF: ${{ github.event.inputs.chart_ref || 'feat/operator-test-compat' }}
+
+jobs:
+  collect:
+    name: Collect operator-marked tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect-only (@pytest.mark.operator)
+        env:
+          COLLECT_ONLY: "1"
+          CHART_REPO: ${{ env.CHART_REPO }}
+          CHART_REF: ${{ env.CHART_REF }}
+        run: |
+          chmod +x hack/run-chart-operator-gate.sh
+          ./hack/run-chart-operator-gate.sh
+
+  e2e:
+    name: Run operator gate on OpenShift
+    needs: collect
+    runs-on: ubuntu-latest
+    # Skip when no kubeconfig secret (typical fork PRs). Manual dispatch can
+    # still request e2e; the step fails clearly if the secret is empty.
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_e2e == 'true')
+      || (github.event_name != 'workflow_dispatch' && vars.OPERATOR_CHART_E2E_ENABLED == 'true')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install oc
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+
+      - name: Configure kubeconfig
+        env:
+          OPENSHIFT_KUBECONFIG: ${{ secrets.OPENSHIFT_KUBECONFIG }}
+        run: |
+          if [[ -z "${OPENSHIFT_KUBECONFIG}" ]]; then
+            echo "::error::OPENSHIFT_KUBECONFIG secret is empty; provision a cluster and add the kubeconfig secret, or disable e2e."
+            exit 1
+          fi
+          mkdir -p "${HOME}/.kube"
+          # Secret may be raw kubeconfig YAML or base64.
+          if echo "${OPENSHIFT_KUBECONFIG}" | head -c 20 | grep -q 'apiVersion'; then
+            printf '%s\n' "${OPENSHIFT_KUBECONFIG}" > "${HOME}/.kube/config"
+          else
+            echo "${OPENSHIFT_KUBECONFIG}" | base64 -d > "${HOME}/.kube/config"
+          fi
+          chmod 600 "${HOME}/.kube/config"
+          oc whoami
+          oc cluster-info | head -3
+
+      - name: Run chart operator gate
+        env:
+          CHART_REPO: ${{ env.CHART_REPO }}
+          CHART_REF: ${{ env.CHART_REF }}
+          DEPLOYMENT_MODE: operator
+          NAMESPACE: ${{ vars.OPERATOR_CHART_NAMESPACE || 'cost-tests' }}
+          HELM_RELEASE_NAME: ${{ vars.OPERATOR_CHART_RELEASE || 'cost-onprem' }}
+          KEYCLOAK_NAMESPACE: ${{ vars.OPERATOR_CHART_KEYCLOAK_NAMESPACE || 'keycloak' }}
+          KAFKA_NAMESPACE: ${{ vars.OPERATOR_CHART_KAFKA_NAMESPACE || 'kafka' }}
+          STORAGE_SECRET_NAME: ${{ vars.OPERATOR_CHART_STORAGE_SECRET || 'cost-onprem-storage-credentials' }}
+          OPERATOR_GATE_REPORT_DIR: ${{ github.workspace }}/chart-operator-gate-reports
+        run: |
+          chmod +x hack/run-chart-operator-gate.sh
+          mkdir -p "${OPERATOR_GATE_REPORT_DIR}"
+          ./hack/run-chart-operator-gate.sh
+
+      - name: Upload pytest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chart-operator-gate-reports
+          path: chart-operator-gate-reports/**
+          if-no-files-found: ignore
