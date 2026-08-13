@@ -46,6 +46,15 @@ func podFrom(cfg *costv1alpha1.CostManagementServiceConfig, component string, po
 	}
 }
 
+// ingressFromPods builds one ingress rule per pod component on the given port.
+func ingressFromPods(cfg *costv1alpha1.CostManagementServiceConfig, port int32, pods []string) []networkingv1.NetworkPolicyIngressRule {
+	rules := make([]networkingv1.NetworkPolicyIngressRule, 0, len(pods))
+	for _, name := range pods {
+		rules = append(rules, podFrom(cfg, name, port))
+	}
+	return rules
+}
+
 // -----------------------------------------------------------------------------
 // Gateway (Envoy JWT proxy)
 // -----------------------------------------------------------------------------
@@ -138,6 +147,64 @@ func ROSAPINetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *network
 	return netpol(cfg, cfg.Name+"-ros-api", "ros-api", []networkingv1.NetworkPolicyIngressRule{
 		podFrom(cfg, "gateway", rosAPIPort),
 	})
+}
+
+// -----------------------------------------------------------------------------
+// Bundled Valkey (cache)
+// -----------------------------------------------------------------------------
+
+// CacheNetworkPolicy restricts ingress to the bundled Valkey instance.
+// Only Koku workloads (API, Masu, Listener, Celery, RBAC) need cache access.
+// The bundled Valkey runs with --protected-mode no (dev-only, no auth); this
+// NetworkPolicy is defense-in-depth to prevent arbitrary namespace pods from
+// reading/writing the cache.
+func CacheNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	cachePort := cfg.Spec.Cache.Port
+	if cachePort == 0 {
+		cachePort = 6379
+	}
+	return netpol(cfg, cfg.Name+"-cache", "cache", ingressFromPods(cfg, cachePort, []string{
+		"cost-management-api",
+		"cost-processor",
+		"listener",
+		"cost-scheduler",
+		"cost-worker-celery",
+		"cost-worker-priority",
+		"cost-worker-summary",
+		"cost-worker-ocp",
+		"cost-worker-cost-model",
+		"cost-worker-refresh",
+		"cost-worker-hcs",
+		"cost-worker-download",
+		"cost-worker-subs-extraction",
+		"cost-worker-subs-transmission",
+		"rbac-api",
+		"rbac-worker",
+	}))
+}
+
+// -----------------------------------------------------------------------------
+// Bundled Database (PostgreSQL)
+// -----------------------------------------------------------------------------
+
+// DatabaseNetworkPolicy restricts ingress to the bundled PostgreSQL instance.
+// Only services that connect to the database need access.
+func DatabaseNetworkPolicy(cfg *costv1alpha1.CostManagementServiceConfig) *networkingv1.NetworkPolicy {
+	dbPort := cfg.Spec.Database.Port
+	if dbPort == 0 {
+		dbPort = 5432
+	}
+	return netpol(cfg, cfg.Name+"-database", "database", ingressFromPods(cfg, dbPort, []string{
+		"cost-management-api",
+		"cost-processor",
+		"rbac-api",
+		"rbac-worker",
+		"ros-api",
+		"ros-processor",
+		"ros-recommendation-poller",
+		"ros-housekeeper",
+		"ros-optimization",
+	}))
 }
 
 // -----------------------------------------------------------------------------

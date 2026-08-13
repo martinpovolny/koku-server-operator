@@ -9,7 +9,14 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
-// CacheDeployment builds the Valkey Deployment.
+// CacheDeployment builds the bundled Valkey Deployment (dev/CI only).
+//
+// The server runs with --protected-mode no and no --requirepass / TLS flags.
+// This is intentional: the bundled cache is not for production (BYOI model).
+// spec.cache.auth and spec.cache.tls configure *client-side* env vars on
+// Koku/RBAC containers for connecting to an *external* Redis/Valkey; they
+// do not affect this bundled server. A CacheNetworkPolicy restricts ingress
+// to operator-managed pods as defense in depth.
 func CacheDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Deployment {
 	name := NameValkey(cfg)
 	selLabels := SelectorLabels(cfg, "cache")
