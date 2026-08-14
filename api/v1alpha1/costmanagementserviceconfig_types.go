@@ -329,13 +329,16 @@ type BootstrapAdminSpec struct {
 type KeycloakSyncSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 	// +kubebuilder:default:="*/15 * * * *"
-	Schedule         string                      `json:"schedule,omitempty"`
-	OrgGroupPrefix   string                      `json:"orgGroupPrefix,omitempty"`
-	OrgAdminSubgroup string                      `json:"orgAdminSubgroup,omitempty"`
-	PruneOrphans     bool                        `json:"pruneOrphans,omitempty"`
-	ClientID         string                      `json:"clientId,omitempty"`
-	ClientSecretRef  SecretKeyRef                `json:"clientSecretRef,omitempty"`
-	Resources        corev1.ResourceRequirements `json:"resources,omitempty"`
+	Schedule         string `json:"schedule,omitempty"`
+	OrgGroupPrefix   string `json:"orgGroupPrefix,omitempty"`
+	OrgAdminSubgroup string `json:"orgAdminSubgroup,omitempty"`
+	// PruneOrphans deletes RBAC Principals that no longer exist in the
+	// org's Keycloak group. Matches the Helm chart default (true).
+	// +kubebuilder:default:=true
+	PruneOrphans    *bool                       `json:"pruneOrphans,omitempty"`
+	ClientID        string                      `json:"clientId,omitempty"`
+	ClientSecretRef SecretKeyRef                `json:"clientSecretRef,omitempty"`
+	Resources       corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
