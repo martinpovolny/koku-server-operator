@@ -96,14 +96,12 @@ spec:
     keycloak:
       # JWKS fetch URL (prefer in-cluster Service). When RHBK sets a public
       # hostname, tokens use that URL as iss — set issuerURL to match.
-      url: "https://keycloak-service.keycloak.svc.cluster.local:8443"
+      url: "https://keycloak.keycloak.svc.cluster.local"
       # issuerURL: "https://keycloak-keycloak.apps.example.com"
       realm: kubernetes
       audiences:
         - "cost-management-operator"
         - "cost-management-ui"
-      tls:
-        insecureSkipVerify: true
 
   ui:
     replicaCount: 1
