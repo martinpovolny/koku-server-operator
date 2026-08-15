@@ -33,16 +33,16 @@ Several paths report success while the underlying dependency is wrong or while a
 
 | Gap | Tickets | Why beta-blocking |
 |-----|---------|-------------------|
-| Edge overwrites `AuthenticationReady` (`OIDCUnreachable` → `GatewayReady`) | [7684 R1](COST-7684.md), [7688 G1](COST-7688.md) | Auth failure erased same reconcile; OIDC failure is non-blocking so Edge still runs; Available/Ready can look healthy |
+| Edge overwrites `AuthenticationReady` (`OIDCUnreachable` → `GatewayReady`) | [7684 R1](COST-7684.md), [7688 G1](COST-7688.md) | **Closed** — dedicated `GatewayReady`; OIDC stays on `AuthenticationReady` |
 | S3 Secret keys never checked; `StorageReady=True` on user path | [7684 G2](COST-7684.md), [7683 R1](COST-7683.md) | Bad/missing credentials still “ready” |
 | No S3 connectivity probe | [7684 G1](COST-7684.md) | Endpoint/TLS/network failures invisible until upload fails |
 | OIDC HTTP probe accepts any status &lt; 500 | [7684 G3](COST-7684.md) | 401/404 still `AuthenticationReady=True` |
 | External DB secret validation omits `kruize-user` / `kruize-password` | [7684 R3](COST-7684.md) | **→ [COST-8054](../jira/COST-8054.md)** (Kruize); not a Cost beta blocker |
 | External DB secret validation always requires `ros-user` / `ros-password` | [7684](COST-7684.md), [8054](../jira/COST-8054.md) | **→ [COST-8054](../jira/COST-8054.md)** — blocks true Cost-only BYOI even when `ros.enabled=false` |
 | RBAC Deployments applied but never gated; no `RBACReady` | [7689 G2](COST-7689.md) | Core can go Available while RBAC is down |
-| `UIReady` / Ingress / workers not truly readiness-gated | [7690 R2](COST-7690.md), [7688 R4](COST-7688.md), [7687](COST-7687.md) | Weaker than RBAC/S3; still erodes trust in status |
+| `UIReady` / Celery workers not truly readiness-gated | [7690 R2](COST-7690.md), [7687](COST-7687.md) | Ingress is gated (`IngressReady`, COST-7688 R4 closed); UI/Celery still weaker than RBAC/S3 |
 
-**Beta minimum:** fix Auth condition collision + S3 secret-key check + tighten OIDC success + RBAC readiness gate.
+**Beta minimum:** S3 secret-key check + tighten OIDC success + RBAC readiness gate. (Auth condition collision closed under COST-7688.)
 
 ---
 

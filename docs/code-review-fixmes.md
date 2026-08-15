@@ -17,11 +17,10 @@ refreshes `LastTransitionTime`, so the status patch differs from what was read.
 No generation-change predicate on the primary watch, so the status update
 re-enqueues immediately. The 5-minute drift interval is effectively bypassed.
 
-#### 3. Failed OIDC check overwritten with success [D3]
+#### 3. Failed OIDC check overwritten with success [D3] — **closed**
 
-Validation sets `AuthenticationReady=False` when JWKS is unreachable.
-`reconcileEdge` later unconditionally sets it `True` when the Envoy Deployment
-and Route exist. A dead Keycloak can finish a pass as `AuthReady=True`.
+Edge writes `GatewayReady`. Validation keeps `AuthenticationReady` for the
+JWKS probe. See [COST-7688](gap_analysis/COST-7688.md).
 
 #### 4. Rollout readiness accepts stale replicas [D14]
 

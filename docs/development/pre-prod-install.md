@@ -239,7 +239,8 @@ kubectl -n "$NAMESPACE" describe cmsc "$CR_NAME"
 ```
 
 Useful conditions: `DatabaseReady`, `CacheReady`, `KafkaReady`,
-`SchemaUpToDate`, `AuthenticationReady` (gateway), `UIReady`, `Available`.
+`SchemaUpToDate`, `AuthenticationReady` (OIDC), `GatewayReady`,
+`IngressReady`, `UIReady`, `Available`.
 
 Phase is human-readable only — prefer conditions.
 
