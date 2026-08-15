@@ -84,17 +84,7 @@ a `CostManagementServiceConfig` CR + Go reconciler.
 
 ## 2. Open Issues (Broken / Wrong)
 
-### 2.1 Envoy ingress upload timeout too low
-
-**Severity: HIGH — will cause 504 errors on file uploads**
-
-The Helm chart configures the ingress (upload) route with a 180-second timeout
-and 60-second per-try timeout. The operator's Envoy config (`envoy.go`)
-uses a flat 30s timeout for `/api/ingress/` with 15s per-try.
-
-**This will cause 504 Gateway Timeout on any upload taking longer than 30s.**
-
-### 2.2 Celery beat has zero resource limits
+### 2.1 Celery beat has zero resource limits
 
 **Severity: MEDIUM — unbounded resource consumption**
 
@@ -102,7 +92,7 @@ uses a flat 30s timeout for `/api/ingress/` with 15s per-try.
 (empty). The chart sets requests `{cpu: 50m, mem: 200Mi}` and limits
 `{cpu: 100m, mem: 400Mi}`.
 
-### 2.3 Masu Service port mismatch
+### 2.2 Masu Service port mismatch
 
 **Severity: MEDIUM — metrics scraping may break**
 
@@ -253,8 +243,7 @@ the chart, restricting access to the bundled infrastructure.
 
 ### 6.1 Envoy routing config: largely equivalent
 
-Both define the same 5 Envoy route entries. The only material difference
-is the ingress timeout (see section 2.1).
+Both define the same 5 Envoy route entries with matching timeouts.
 
 | Route prefix | Cluster | Chart timeout | Operator timeout |
 |---|---|---|---|
@@ -262,7 +251,7 @@ is the ingress timeout (see section 2.1).
 | `/api/rbac/` | rbac-api-backend | 30s | 30s |
 | `/api/cost-management/` | koku-api-backend | 60s | 60s |
 | `/api/ingress/ready` | ingress-backend | 10s | 10s |
-| `/api/ingress/` | ingress-backend | **180s** | **30s** |
+| `/api/ingress/` | ingress-backend | 180s | 180s |
 
 ### 6.2 Route path: `/api` vs `/`
 
@@ -284,20 +273,19 @@ Chart uses Helm-standard labels. Both are valid.
 
 The operator doesn't set `haproxy.router.openshift.io/timeout` on the
 gateway Route (user can set it via `spec.gatewayRoute.annotations`). The
-chart sets `180s`. Combined with the Envoy timeout issue in 2.1, uploads
-are doubly broken.
+chart sets `180s`. The Envoy-side timeout is now correct (180s), but the
+OpenShift Route annotation default should also be set for consistency.
 
 ---
 
 ## 7. Remaining Fixes (Priority Order)
 
-1. **Fix Envoy ingress timeout** (`envoy.go`): change `/api/ingress/` route timeout to 180s and per_try_timeout to 60s
-2. **Set `ENHANCED_ORG_ADMIN=False`** in `KokuCommonEnv()` — critical for RBAC scoping
-3. **Add Celery beat resources** (`koku.go`): set `{cpu: 50m, mem: 200Mi}` / `{cpu: 100m, mem: 400Mi}`
-4. **Fix Masu Service port** (`koku.go`): expose port 8000 (http) + 9000 (metrics)
-5. **Add ROS Processor + Poller Services**: needed for Prometheus metrics scraping
-6. **Add metrics-scraping NetworkPolicies**: allow Prometheus to reach metrics ports
-7. **Add RBAC + Gateway + ROS components to ServiceMonitors**: close monitoring gaps
-8. **Set default Route timeout annotation** to 180s in GatewayAPIRoute
-9. **Add remaining env var defaults**: `S3_VERIFY_SSL`, `INITIAL_INGEST_NUM_MONTHS`, logging vars
-10. **Expose `roleCreateAllowList`** in the RBAC CR section
+1. **Set `ENHANCED_ORG_ADMIN=False`** in `KokuCommonEnv()` — critical for RBAC scoping
+2. **Add Celery beat resources** (`koku.go`): set `{cpu: 50m, mem: 200Mi}` / `{cpu: 100m, mem: 400Mi}`
+3. **Fix Masu Service port** (`koku.go`): expose port 8000 (http) + 9000 (metrics)
+4. **Add ROS Processor + Poller Services**: needed for Prometheus metrics scraping
+5. **Add metrics-scraping NetworkPolicies**: allow Prometheus to reach metrics ports
+6. **Add RBAC + Gateway + ROS components to ServiceMonitors**: close monitoring gaps
+7. **Set default Route timeout annotation** to 180s in GatewayAPIRoute
+8. **Add remaining env var defaults**: `S3_VERIFY_SSL`, `INITIAL_INGEST_NUM_MONTHS`, logging vars
+9. **Expose `roleCreateAllowList`** in the RBAC CR section

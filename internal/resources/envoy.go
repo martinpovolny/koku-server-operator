@@ -466,11 +466,11 @@ __ROS_ROUTE__              - match:
                   prefix: "/api/ingress/"
                 route:
                   cluster: ingress-backend
-                  timeout: 30s
+                  timeout: 180s
                   retry_policy:
                     retry_on: 5xx,reset,connect-failure,refused-stream
                     num_retries: 2
-                    per_try_timeout: 15s
+                    per_try_timeout: 60s
           http_filters:
           - name: envoy.filters.http.jwt_authn
             typed_config:
