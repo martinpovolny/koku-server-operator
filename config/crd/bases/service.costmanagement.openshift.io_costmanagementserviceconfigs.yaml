@@ -2704,7 +2704,7 @@ spec:
                   Standard conditions: Available, Progressing, Degraded.
                   Component conditions: DatabaseReady, CacheReady, StorageReady,
                   KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete,
-                  GatewayReady, UIReady.
+                  GatewayReady, IngressReady, UIReady.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

@@ -621,6 +621,17 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 		}
 	}
 
+	ready, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameIngress(cfg))
+	if err != nil {
+		return Result{}, err
+	}
+	if !ready {
+		r.setCondition(cfg, costv1alpha1.ConditionIngressReady, metav1.ConditionFalse,
+			"WaitingForIngress", "waiting for Ingress upload Deployment")
+		return Result{RequeueAfter: requeueSlow}, nil
+	}
+	r.setCondition(cfg, costv1alpha1.ConditionIngressReady, metav1.ConditionTrue,
+		"IngressReady", "Ingress upload Deployment is ready")
 	return Result{}, nil
 }
 
