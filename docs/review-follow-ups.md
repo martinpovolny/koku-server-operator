@@ -166,50 +166,107 @@ in `ros_cleanup_test.go`.
 
 **Source:** Cluster Bot pre-prod install (`hack/demo-preprod.sh --reset`), 2026-08-15.
 Cluster `chat-bot-jyn4z-xta9nw`; namespace `cost-byoi` stayed `Terminating` after
-`kubectl delete ns`.
+`kubectl delete ns`. Related: [COST-7681](jira/COST-7681.md) (why the finalizer
+exists), [ownnamespace.md](development/ownnamespace.md),
+[COST-7695](jira/COST-7695.md) (OLM bundle / installModes).
 
-**Problem:** The CR finalizer
-`costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
-is required: ConsoleLink and Kruize ClusterRole/Binding are cluster-scoped, so
-they cannot use `ownerReferences`. `reconcileDelete()` deletes those objects
-then strips the finalizer. That path is correct **when the CR is deleted and
-the manager is still running**.
+**What is *not* broken:** `reconcileDelete()` in
+`internal/controller/costmanagementserviceconfig_controller.go`. That path
+deletes cluster-scoped leftovers and then removes the finalizer
+`costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`.
+It works whenever the **CR is deleted and a manager is still running** to
+handle the delete reconcile.
 
-OwnNamespace puts the manager Deployment in the **same namespace as the CR**.
-Deleting the namespace (or tearing down the operator CSV/Deployment first)
-kills the operator pod before it can process the CR's `deletionTimestamp`.
-The finalizer is never removed.
+**Why the finalizer exists (COST-7681):** Kubernetes `ownerReferences` do not
+garbage-collect **cluster-scoped** objects when a namespaced CR goes away.
+The operator therefore blocks CR deletion until it has deleted:
 
-Observed on clusterbot:
+- ConsoleLink `{cr.metadata.name}-cost-management` (e.g.
+  `cost-management-cost-management`)
+- Kruize ClusterRole + ClusterRoleBinding `{cr.metadata.name}-kruize-<8 hex>`
+  (only created when ROS/Kruize ran)
 
-- Namespace condition `NamespaceFinalizersRemaining`:
-  `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
-  on 1 resource
-- `NamespaceContentRemaining`: the CMSC instance still present
-- Operator pods already gone (`No resources found`)
-- ConsoleLink `cost-management-cost-management` still present (cluster leak)
+**Why OwnNamespace makes namespace delete unsafe:** this operator’s install
+namespace **is** the CR namespace ([ownnamespace.md](development/ownnamespace.md)).
+The manager Deployment lives next to the CR. `oc delete ns <cr-ns>` (or
+deleting the operator Deployment/CSV first) terminates the manager pod
+**before** it can see the CR’s `deletionTimestamp`. The finalizer stays, the
+namespace cannot finish, and the ConsoleLink (and Kruize cluster RBAC, if
+any) leak.
 
-Unstick: patch `metadata.finalizers: []` on the CMSC and delete the ConsoleLink.
-The namespace then finished terminating in seconds.
+Contrast: laptop `make run` is *not* in that namespace, so a namespace
+delete can still be reconciled if the out-of-cluster process is up. The
+in-cluster lab/OLM path is the one that fails.
 
-**Impact:** Medium for lab/uninstall. Any `oc delete ns <cr-ns>`, Cluster Bot
-teardown, or OLM uninstall that removes the operator before the CR will leave
-the namespace stuck and leak ConsoleLink (and Kruize cluster RBAC if ROS was
-enabled). Production uninstall without a documented CR-first procedure hits
-the same trap. Not a bug in `reconcileDelete` itself.
+**Correct uninstall order (must be documented and automated):**
+
+1. `oc -n <ns> delete cmsc <name>`
+2. Wait until the CMSC object is **gone** (finalizer cleared; ConsoleLink
+   deleted by the operator).
+3. Then delete the namespace and/or the operator.
+
+Lab `--reset` must do step 1 **while the operator Deployment is Available**.
+Only strip the finalizer by hand if the operator is already gone.
+
+**Broken sequences (same failure):**
+
+- `oc delete ns <cr-ns>` with a live CMSC (what `--reset` did on clusterbot)
+- OLM **Uninstall** / `oc delete csv` while the CR still exists — OLM
+  removes the CSV, which removes the manager Deployment in that namespace,
+  which is the same race
+- Deleting `deploy/koku-service-operator` then the CR
+
+**Observed on clusterbot (`cost-byoi` / CR `cost-management`):**
+
+- `NamespaceFinalizersRemaining`: the cleanup finalizer on 1 CMSC
+- `NamespaceContentRemaining`:
+  `costmanagementserviceconfigs.service.costmanagement.openshift.io` still
+  has 1 instance (`deletionTimestamp` set, finalizer still present)
+- Operator pods already gone
+- ConsoleLink `cost-management-cost-management` still present
+
+**Unstick (lab only — skips operator cleanup of cluster-scoped objects, so
+delete those too):**
+
+```bash
+NS=cost-byoi
+CR=cost-management
+# ConsoleLink name is {CR}-cost-management
+oc delete consolelink "${CR}-cost-management" --ignore-not-found
+oc delete clusterrole,clusterrolebinding -l "app.kubernetes.io/instance=${CR}" --ignore-not-found
+oc -n "$NS" patch cmsc "$CR" --type=merge -p '{"metadata":{"finalizers":[]}}'
+# namespace should leave Terminating within seconds
+```
+
+After that patch, `cost-byoi` finished terminating immediately.
+
+**Impact:** Medium for lab and for any real uninstall. Not a COST-7688
+Envoy/gateway gap. Beta docs + demo `--reset` are the near-term mitigation.
+The **customer** uninstall path is OLM, which is COST-7695, not this branch.
 
 **Suggested fix (in order):**
 
-1. **Document uninstall order** (pre-prod / ownnamespace / OLM): delete the
-   `CostManagementServiceConfig`, wait until it is gone, *then* delete the
-   namespace or the operator. Lab `--reset` must do the same while the
-   operator is still Available; only strip the finalizer if the operator is
-   already gone.
-2. **OLM / COST-7695:** uninstall bundle should delete (or block on) the CR
-   before removing the CSV. AllNamespaces / a dedicated operator namespace
-   would also avoid killing the manager when the operand namespace is deleted.
-3. Optional hardening (probably not worth it for beta): a webhook that warns
-   or blocks namespace deletion while a CMSC with this finalizer exists.
+1. **Document** the CR-first order in [pre-prod-install.md](development/pre-prod-install.md),
+   [ownnamespace.md](development/ownnamespace.md), and the OLM testing doc.
+   Teach `--reset` / Cluster Bot teardown the same order; if the operator is
+   already dead, strip the finalizer and delete ConsoleLink/Kruize cluster
+   RBAC as in the unstick snippet.
+2. **OLM packaging ([COST-7695](jira/COST-7695.md))** — this is the product
+   fix, not a CSV trivia item. COST-7695 delivers the bundle customers
+   install from OperatorHub. The CSV (ClusterServiceVersion) is what OLM
+   uses to create **and delete** the operator Deployment. Today’s lab
+   `deploy-incluster.sh` is not OLM; `oc delete csv` / UI Uninstall will
+   still hit this trap unless the bundle:
+   - deletes (or blocks until gone) the `CostManagementServiceConfig`
+     **before** removing the CSV, and/or
+   - uses an `installMode` where the manager is **not** in the operand
+     namespace (`AllNamespaces`, or a dedicated operator NS such as
+     `koku-service-operator-system`). Then deleting the *app* namespace
+     would not kill the manager, so `reconcileDelete` could still run.
+   `ownnamespace.md` already defers full OLM `installModes` to COST-7695.
+3. Optional hardening (probably not worth it for beta): an admission
+   webhook that warns or blocks namespace deletion while a CMSC still has
+   this finalizer.
 
 **Not a COST-7688 gap** — surfaced while exercising the pre-prod path on this
 branch.
