@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -193,7 +194,7 @@ func TestReconcileDiscovery_BothDiscovered(t *testing.T) {
 		).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -221,7 +222,7 @@ func TestReconcileDiscovery_UserOverride(t *testing.T) {
 	// User sets both values explicitly — no cluster queries needed.
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
@@ -253,7 +254,7 @@ func TestReconcileDiscovery_DomainMissing_RequeuesWithCondition(t *testing.T) {
 		WithObjects(defaultStorageClass("fast")).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -274,7 +275,7 @@ func TestReconcileDiscovery_StorageClassMissing_RequeuesWithCondition(t *testing
 		WithObjects(openShiftIngress(testClusterDomain)).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}

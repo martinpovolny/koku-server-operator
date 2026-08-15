@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
@@ -78,7 +79,7 @@ func assertStorageCondition(t *testing.T, cfg *costv1alpha1.CostManagementServic
 
 func TestResolveS3_UserProvided(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
@@ -118,7 +119,7 @@ func TestResolveS3_OBC(t *testing.T) {
 		).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -151,7 +152,7 @@ func TestResolveS3_NooBaa(t *testing.T) {
 		WithObjects(noobaaAdminSecret("ak-nb", "sk-nb")).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -186,7 +187,7 @@ func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
 		WithObjects(noobaaAdminSecret("ak-api", "sk-api")).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: cached, APIReader: apiReader}
+	r := &CostManagementServiceConfigReconciler{Client: cached, APIReader: apiReader, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -210,7 +211,7 @@ func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
 
 func TestResolveS3_None(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 	}
@@ -230,7 +231,7 @@ func TestReconcileDiscovery_UserProvidedS3_SetsStorageReady(t *testing.T) {
 		).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{
@@ -270,7 +271,7 @@ func TestReconcileDiscovery_NoS3_SetsStorageReadyFalse_Continues(t *testing.T) {
 		).
 		Build()
 
-	r := &CostManagementServiceConfigReconciler{Client: c}
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
 		Spec: costv1alpha1.CostManagementServiceConfigSpec{

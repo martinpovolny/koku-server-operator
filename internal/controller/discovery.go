@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -63,6 +65,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileDiscovery(ctx context.C
 			reason, fmt.Sprintf("endpoint=%s secret=%s", s3.Endpoint, s3.SecretName))
 	}
 
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionDiscoveryComplete) {
+		r.Recorder.Eventf(cfg, corev1.EventTypeNormal, "DiscoveryComplete",
+			"clusterDomain=%s storageClass=%s", domain, sc)
+	}
 	r.setCondition(cfg, costv1alpha1.ConditionDiscoveryComplete, metav1.ConditionTrue,
 		"Discovered",
 		fmt.Sprintf("clusterDomain=%s storageClass=%s", domain, sc))
