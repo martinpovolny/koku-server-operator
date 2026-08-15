@@ -92,7 +92,24 @@ func TestGatewayAPIRouteTLSOverrides(t *testing.T) {
 	}
 	route := GatewayAPIRoute(cfg)
 	term, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
-	if term != "reencrypt" {
-		t.Errorf("termination = %q", term)
+	if term != "edge" {
+		t.Errorf("termination = %q, want edge (Envoy is plaintext HTTP)", term)
+	}
+	insecure, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "insecureEdgeTerminationPolicy")
+	if insecure != "Allow" {
+		t.Errorf("insecureEdgeTerminationPolicy = %q, want Allow", insecure)
+	}
+}
+
+func TestGatewayAPIRoute_NonEdgeTerminationCoercedToEdge(t *testing.T) {
+	cfg := testCfg()
+	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{ClusterDomain: "apps.example.com"}
+	for _, term := range []string{"passthrough", "reencrypt"} {
+		cfg.Spec.GatewayRoute.TLS.Termination = term
+		route := GatewayAPIRoute(cfg)
+		got, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
+		if got != "edge" {
+			t.Errorf("termination %q: got %q, want edge (Envoy is plaintext HTTP)", term, got)
+		}
 	}
 }

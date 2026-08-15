@@ -45,7 +45,7 @@ func GatewayAPIRoute(cfg *costv1alpha1.CostManagementServiceConfig) *unstructure
 	}
 
 	termination := cfg.Spec.GatewayRoute.TLS.Termination
-	if termination == "" {
+	if termination != "edge" {
 		termination = "edge"
 	}
 	insecurePolicy := cfg.Spec.GatewayRoute.TLS.InsecureEdgeTerminationPolicy
