@@ -102,12 +102,22 @@ jobs:
       - name: Run tests (unit + envtest integration)
         run: make test
 
+      - name: Coverage gate (internal packages)
+        run: make coverage-gate
+
       - name: Coverage summary
         run: |
           echo '### Test Coverage' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           go tool cover -func=cover.out | grep -E 'total:|\.go:' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ -f cover.internal.out ]; then
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '### Internal coverage (gate)' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            go tool cover -func=cover.internal.out | grep '^total:' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
 
   check-generated:
     name: Check Generated Code

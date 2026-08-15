@@ -104,6 +104,111 @@ func TestKokuAPINetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestCacheNetworkPolicy(t *testing.T) {
+	cachePeers := []string{
+		"cost-management-api",
+		"cost-processor",
+		"listener",
+		"cost-scheduler",
+		"cost-worker-celery",
+		"cost-worker-priority",
+		"cost-worker-summary",
+		"cost-worker-ocp",
+		"cost-worker-cost-model",
+		"cost-worker-refresh",
+		"cost-worker-hcs",
+		"cost-worker-download",
+		"cost-worker-subs-extraction",
+		"cost-worker-subs-transmission",
+		"rbac-api",
+		"rbac-worker",
+	}
+
+	cfg := testCfg()
+	np := CacheNetworkPolicy(cfg)
+	if np.Name != cfg.Name+"-cache" {
+		t.Errorf("Name = %q", np.Name)
+	}
+	assertIngressOnly(t, np)
+	if got := np.Spec.PodSelector.MatchLabels[labelComponent]; got != "cache" {
+		t.Errorf("podSelector component = %q", got)
+	}
+	if len(np.Spec.Ingress) != len(cachePeers) {
+		t.Fatalf("ingress rules = %d, want %d", len(np.Spec.Ingress), len(cachePeers))
+	}
+	if !ruleAllowsPort(np.Spec.Ingress, 6379) {
+		t.Errorf("missing default cache port 6379")
+	}
+	for _, comp := range []string{"cost-management-api", "cost-processor", "listener", "rbac-api", "rbac-worker", "cost-worker-celery", "cost-worker-summary"} {
+		found := false
+		for _, rule := range np.Spec.Ingress {
+			if peerHasComponent(rule, comp) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing peer component %q", comp)
+		}
+	}
+
+	cfgCustom := testCfg()
+	cfgCustom.Spec.Cache.Port = 6380
+	npCustom := CacheNetworkPolicy(cfgCustom)
+	if !ruleAllowsPort(npCustom.Spec.Ingress, 6380) {
+		t.Errorf("missing custom cache port 6380")
+	}
+}
+
+func TestDatabaseNetworkPolicy(t *testing.T) {
+	dbPeers := []string{
+		"cost-management-api",
+		"cost-processor",
+		"rbac-api",
+		"rbac-worker",
+		"ros-api",
+		"ros-processor",
+		"ros-recommendation-poller",
+		"ros-housekeeper",
+		"ros-optimization",
+	}
+
+	cfg := testCfg()
+	np := DatabaseNetworkPolicy(cfg)
+	if np.Name != cfg.Name+"-database" {
+		t.Errorf("Name = %q", np.Name)
+	}
+	assertIngressOnly(t, np)
+	if got := np.Spec.PodSelector.MatchLabels[labelComponent]; got != "database" {
+		t.Errorf("podSelector component = %q", got)
+	}
+	if len(np.Spec.Ingress) != len(dbPeers) {
+		t.Fatalf("ingress rules = %d, want %d", len(np.Spec.Ingress), len(dbPeers))
+	}
+	if !ruleAllowsPort(np.Spec.Ingress, 5432) {
+		t.Errorf("missing default database port 5432")
+	}
+	for _, comp := range []string{"cost-management-api", "cost-processor", "rbac-api", "ros-api", "ros-processor", "ros-optimization"} {
+		found := false
+		for _, rule := range np.Spec.Ingress {
+			if peerHasComponent(rule, comp) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing peer component %q", comp)
+		}
+	}
+
+	cfgCustom := testCfg()
+	cfgCustom.Spec.Database.Port = 5433
+	npCustom := DatabaseNetworkPolicy(cfgCustom)
+	if !ruleAllowsPort(npCustom.Spec.Ingress, 5433) {
+		t.Errorf("missing custom database port 5433")
+	}
+}
+
 func TestROSAPINetworkPolicy_GatewayOnly(t *testing.T) {
 	// Extends the smoke test in names_test.go with peer/port assertions.
 	cfg := testCfg()
