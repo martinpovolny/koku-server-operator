@@ -1,11 +1,14 @@
 package resources
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
@@ -140,6 +143,88 @@ func TestValidateUIOAuthClientSecret(t *testing.T) {
 	}
 	if err := ValidateUIOAuthClientSecret(ok); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUICookieSecret(t *testing.T) {
+	cfg := uiTestCfg()
+	secret := UICookieSecret(cfg)
+	if secret.Name != NameUICookieSecret(cfg) {
+		t.Errorf("Name = %q, want %q", secret.Name, NameUICookieSecret(cfg))
+	}
+	if secret.Labels[labelComponent] != "ui" {
+		t.Errorf("component label = %q", secret.Labels[labelComponent])
+	}
+	val := secret.StringData["session-secret"]
+	if val == "" {
+		t.Error("session-secret must be non-empty")
+	}
+}
+
+func TestUINginxConfigMap(t *testing.T) {
+	cfg := uiTestCfg()
+	cm := UINginxConfigMap(cfg)
+	nginx := cm.Data["nginx.conf"]
+	wantProxy := fmt.Sprintf("proxy_pass http://%s:80", NameEnvoy(cfg))
+	if !strings.Contains(nginx, wantProxy) {
+		t.Errorf("nginx config missing %q", wantProxy)
+	}
+	if !strings.Contains(nginx, "location /api/") {
+		t.Error("nginx config missing /api/ location")
+	}
+}
+
+func TestUIService(t *testing.T) {
+	cfg := uiTestCfg()
+	svc := UIService(cfg)
+	if svc.Name != NameUI(cfg) {
+		t.Errorf("Name = %q", svc.Name)
+	}
+	if len(svc.Spec.Ports) != 1 {
+		t.Fatalf("ports = %+v", svc.Spec.Ports)
+	}
+	port := svc.Spec.Ports[0]
+	if port.Name != "https" || port.Port != uiProxyPort {
+		t.Errorf("port = %+v, want https/%d", port, uiProxyPort)
+	}
+	wantAnnot := NameUITLSSecret(cfg)
+	if got := svc.Annotations["service.beta.openshift.io/serving-cert-secret-name"]; got != wantAnnot {
+		t.Errorf("serving-cert annotation = %q, want %q", got, wantAnnot)
+	}
+}
+
+func TestUIRoute_NilWithoutClusterDomain(t *testing.T) {
+	cfg := testCfg()
+	if UIRoute(cfg) != nil {
+		t.Error("expected nil Route when cluster domain is missing")
+	}
+}
+
+func TestUIRoute_Spec(t *testing.T) {
+	cfg := uiTestCfg()
+	route := UIRoute(cfg)
+	if route == nil {
+		t.Fatal("expected Route when cluster domain is set")
+	}
+	if route.GroupVersionKind() != routeGVK {
+		t.Errorf("GVK = %v, want %v", route.GroupVersionKind(), routeGVK)
+	}
+	wantHost := fmt.Sprintf("%s-ui-%s.%s", cfg.Name, cfg.Namespace, cfg.Status.DiscoveredConfig.ClusterDomain)
+	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
+	if host != wantHost {
+		t.Errorf("spec.host = %q, want %q", host, wantHost)
+	}
+	svc, _, _ := unstructured.NestedString(route.Object, "spec", "to", "name")
+	if svc != NameUI(cfg) {
+		t.Errorf("spec.to.name = %q, want %q", svc, NameUI(cfg))
+	}
+	targetPort, _, _ := unstructured.NestedString(route.Object, "spec", "port", "targetPort")
+	if targetPort != "https" {
+		t.Errorf("spec.port.targetPort = %q, want https", targetPort)
+	}
+	term, _, _ := unstructured.NestedString(route.Object, "spec", "tls", "termination")
+	if term != "passthrough" {
+		t.Errorf("tls.termination = %q, want passthrough", term)
 	}
 }
 

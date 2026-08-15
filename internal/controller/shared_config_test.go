@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -149,6 +150,53 @@ func fakeClientWithApplySupport(scheme *runtime.Scheme, objs ...client.Object) c
 			return c.Update(ctx, obj)
 		},
 	}).Build()
+}
+
+// fakeClientPreservingStatus is like fakeClientWithApplySupport, but enables
+// Deployment/StatefulSet status subresources. Builder objects have empty Status;
+// without the subresource, Update ignores Status writes and a second apply()
+// cannot see AvailableReplicas seeded after the first pass.
+func fakeClientPreservingStatus(scheme *runtime.Scheme, objs ...client.Object) client.Client {
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithStatusSubresource(&appsv1.Deployment{}, &appsv1.StatefulSet{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
+				key := client.ObjectKeyFromObject(obj)
+				existing := obj.DeepCopyObject().(client.Object)
+				err := c.Get(ctx, key, existing)
+				if apierrors.IsNotFound(err) {
+					return c.Create(ctx, obj)
+				}
+				if err != nil {
+					return err
+				}
+				obj.SetResourceVersion(existing.GetResourceVersion())
+				// With status subresource enabled, Update leaves Status intact.
+				return c.Update(ctx, obj)
+			},
+		}).Build()
+}
+
+// markDeploymentReady sets AvailableReplicas to Spec.Replicas so isDeploymentReady
+// returns true. Requires a client built with WithStatusSubresource(&appsv1.Deployment{}).
+func markDeploymentReady(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	d := &appsv1.Deployment{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, d); err != nil {
+		t.Fatalf("get deployment %s: %v", name, err)
+	}
+	replicas := int32(1)
+	if d.Spec.Replicas != nil {
+		replicas = *d.Spec.Replicas
+	}
+	d.Status.AvailableReplicas = replicas
+	d.Status.ReadyReplicas = replicas
+	d.Status.Replicas = replicas
+	if err := c.Status().Update(context.Background(), d); err != nil {
+		t.Fatalf("mark deployment %s ready: %v", name, err)
+	}
 }
 
 func TestReconcileSharedConfig_CreatesStorageCredentialsPlaceholder(t *testing.T) {
