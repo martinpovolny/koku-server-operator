@@ -41,9 +41,9 @@ func TestReconcileEdge_EnvoyNotReady(t *testing.T) {
 	mustNotExist(t, r.Client, testNamespace, resources.NameUICookieSecret(cfg), &corev1.Secret{})
 	mustNotExist(t, r.Client, testNamespace, resources.NameUI(cfg), &appsv1.Deployment{})
 
-	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForGateway" {
-		t.Fatalf("expected AuthReady=False WaitingForGateway, got %+v", cond)
+		t.Fatalf("expected GatewayReady=False WaitingForGateway, got %+v", cond)
 	}
 }
 
@@ -70,9 +70,9 @@ func TestReconcileEdge_EnvoyReady_NoClusterDomain(t *testing.T) {
 		t.Fatal("expected requeue when cluster domain is missing")
 	}
 
-	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "ClusterDomainPending" {
-		t.Fatalf("expected AuthReady=False ClusterDomainPending, got %+v", cond)
+		t.Fatalf("expected GatewayReady=False ClusterDomainPending, got %+v", cond)
 	}
 
 	// UI is after the domain/route gate — must not run yet.
@@ -105,12 +105,12 @@ func TestReconcileEdge_EnvoyReady_WithDomain_NoOAuth(t *testing.T) {
 		t.Fatal("expected requeue while UIReady is False")
 	}
 
-	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady) {
-		t.Fatal("expected AuthReady=True once Envoy is ready and route exists")
+	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady) {
+		t.Fatal("expected GatewayReady=True once Envoy is ready and route exists")
 	}
-	authCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
-	if authCond == nil || authCond.Reason != "GatewayReady" {
-		t.Fatalf("expected AuthReady reason GatewayReady, got %+v", authCond)
+	gwCond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady)
+	if gwCond == nil || gwCond.Reason != "GatewayReady" {
+		t.Fatalf("expected GatewayReady reason GatewayReady, got %+v", gwCond)
 	}
 
 	route := &unstructured.Unstructured{}
@@ -133,6 +133,36 @@ func TestReconcileEdge_EnvoyReady_WithDomain_NoOAuth(t *testing.T) {
 	// Deploy defaults true → cache/db NetworkPolicies are applied.
 	mustExist(t, r.Client, testNamespace, cfg.Name+"-cache", &networkingv1.NetworkPolicy{})
 	mustExist(t, r.Client, testNamespace, cfg.Name+"-database", &networkingv1.NetworkPolicy{})
+}
+
+func TestReconcileEdge_DoesNotOverwriteOIDCUnreachable(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{ClusterDomain: "apps.example.com"}
+	apimeta.SetStatusCondition(&cfg.Status.Conditions, metav1.Condition{
+		Type:   costv1alpha1.ConditionAuthReady,
+		Status: metav1.ConditionFalse,
+		Reason: "OIDCUnreachable",
+	})
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{Client: c, Scheme: scheme, Recorder: &noopRecorder{}}
+
+	if _, err := r.reconcileEdge(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameEnvoy(cfg))
+	if _, err := r.reconcileEdge(context.Background(), cfg); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+
+	auth := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAuthReady)
+	if auth == nil || auth.Status != metav1.ConditionFalse || auth.Reason != "OIDCUnreachable" {
+		t.Fatalf("AuthenticationReady must stay OIDCUnreachable, got %+v", auth)
+	}
+	gw := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionGatewayReady)
+	if gw == nil || gw.Status != metav1.ConditionTrue || gw.Reason != "GatewayReady" {
+		t.Fatalf("expected GatewayReady=True, got %+v", gw)
+	}
 }
 
 func TestReconcileUI_ValidOAuthSecret(t *testing.T) {

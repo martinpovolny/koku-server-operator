@@ -27,6 +27,9 @@ const (
 	ConditionAuthReady         = "AuthenticationReady"
 	ConditionSchemaUpToDate    = "SchemaUpToDate"
 	ConditionUIReady           = "UIReady"
+	// ConditionGatewayReady reports Envoy Deployment + API Route readiness.
+	// Distinct from AuthenticationReady, which is the OIDC JWKS probe.
+	ConditionGatewayReady = "GatewayReady"
 	// ConditionROSEnabled reports whether ROS/Kruize are active per spec.ros.enabled.
 	ConditionROSEnabled = "ROSEnabled"
 	// ConditionPaused is True when reconciliation is halted via the pause annotation.
@@ -668,7 +671,8 @@ type CostManagementServiceConfigStatus struct {
 	// Conditions is the canonical status API.
 	// Standard conditions: Available, Progressing, Degraded.
 	// Component conditions: DatabaseReady, CacheReady, StorageReady,
-	// KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete.
+	// KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete,
+	// GatewayReady, UIReady.
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

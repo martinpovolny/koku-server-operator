@@ -656,18 +656,18 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 		return Result{}, err
 	}
 	if !ready {
-		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
 			"WaitingForGateway", "waiting for Envoy gateway Deployment")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
 	if route == nil {
-		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
+		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
 			"ClusterDomainPending", "Envoy gateway ready; API Route deferred until cluster domain is available")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
-	r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionTrue,
+	r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionTrue,
 		"GatewayReady", "Envoy JWT gateway and API Route are ready")
 
 	if err := r.reconcileUI(ctx, cfg); err != nil {

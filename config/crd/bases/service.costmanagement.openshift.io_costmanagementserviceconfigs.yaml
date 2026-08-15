@@ -2703,7 +2703,8 @@ spec:
                   Conditions is the canonical status API.
                   Standard conditions: Available, Progressing, Degraded.
                   Component conditions: DatabaseReady, CacheReady, StorageReady,
-                  KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete.
+                  KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete,
+                  GatewayReady, UIReady.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
