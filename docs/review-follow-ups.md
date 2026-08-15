@@ -159,3 +159,58 @@ disabling the sync could leave orphaned CronJobs running.
 
 **Suggested fix:** Add a test following the Kruize CronJob disable pattern
 in `ros_cleanup_test.go`.
+
+---
+
+## 9. OwnNamespace + CR finalizer: namespace delete sticks in Terminating
+
+**Source:** Cluster Bot pre-prod install (`hack/demo-preprod.sh --reset`), 2026-08-15.
+Cluster `chat-bot-jyn4z-xta9nw`; namespace `cost-byoi` stayed `Terminating` after
+`kubectl delete ns`.
+
+**Problem:** The CR finalizer
+`costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
+is required: ConsoleLink and Kruize ClusterRole/Binding are cluster-scoped, so
+they cannot use `ownerReferences`. `reconcileDelete()` deletes those objects
+then strips the finalizer. That path is correct **when the CR is deleted and
+the manager is still running**.
+
+OwnNamespace puts the manager Deployment in the **same namespace as the CR**.
+Deleting the namespace (or tearing down the operator CSV/Deployment first)
+kills the operator pod before it can process the CR's `deletionTimestamp`.
+The finalizer is never removed.
+
+Observed on clusterbot:
+
+- Namespace condition `NamespaceFinalizersRemaining`:
+  `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
+  on 1 resource
+- `NamespaceContentRemaining`: the CMSC instance still present
+- Operator pods already gone (`No resources found`)
+- ConsoleLink `cost-management-cost-management` still present (cluster leak)
+
+Unstick: patch `metadata.finalizers: []` on the CMSC and delete the ConsoleLink.
+The namespace then finished terminating in seconds.
+
+**Impact:** Medium for lab/uninstall. Any `oc delete ns <cr-ns>`, Cluster Bot
+teardown, or OLM uninstall that removes the operator before the CR will leave
+the namespace stuck and leak ConsoleLink (and Kruize cluster RBAC if ROS was
+enabled). Production uninstall without a documented CR-first procedure hits
+the same trap. Not a bug in `reconcileDelete` itself.
+
+**Suggested fix (in order):**
+
+1. **Document uninstall order** (pre-prod / ownnamespace / OLM): delete the
+   `CostManagementServiceConfig`, wait until it is gone, *then* delete the
+   namespace or the operator. Lab `--reset` must do the same while the
+   operator is still Available; only strip the finalizer if the operator is
+   already gone.
+2. **OLM / COST-7695:** uninstall bundle should delete (or block on) the CR
+   before removing the CSV. AllNamespaces / a dedicated operator namespace
+   would also avoid killing the manager when the operand namespace is deleted.
+3. Optional hardening (probably not worth it for beta): a webhook that warns
+   or blocks namespace deletion while a CMSC with this finalizer exists.
+
+**Not a COST-7688 gap** — surfaced while exercising the pre-prod path on this
+branch.
+
