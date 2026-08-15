@@ -114,6 +114,23 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+# Statement coverage across internal/controller + internal/resources (coverpkg),
+# not make test's per-package cover.out. Override: make coverage-gate COVERAGE_MIN=84.0
+COVERAGE_PKG ?= ./internal/...
+COVERAGE_MIN ?= 85.0
+
+.PHONY: coverage-gate
+coverage-gate: setup-envtest ## Fail if ./internal/... statement coverage is below COVERAGE_MIN.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(COVERAGE_PKG) -coverprofile cover.internal.out -coverpkg=$(COVERAGE_PKG)
+	@go tool cover -func=cover.internal.out | awk -v min="$(COVERAGE_MIN)" '\
+	  /^total:/ {\
+	    found=1;\
+	    pct=$$NF; gsub(/%/,"",pct);\
+	    if (pct+0 < min+0) { printf "FAIL: internal coverage %.1f%% is below minimum %.1f%%\n", pct, min; exit 1 }\
+	    printf "OK: internal coverage %.1f%% (minimum %.1f%%)\n", pct, min\
+	  }\
+	  END { if (!found) { print "FAIL: no total coverage line in cover.internal.out"; exit 1 } }'
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
