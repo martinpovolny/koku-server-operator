@@ -1,12 +1,26 @@
 package resources
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
 // Shared PodSpec helpers used by workload builders across this package.
+
+// CronJob defaults shared by all operator-managed CronJobs (Kruize partitions,
+// ROS partition cleaner, RBAC Keycloak sync). Centralised so scheduling and
+// retry behaviour stays consistent and future tuning only touches one place.
+var (
+	CronJobConcurrencyForbid       = batchv1.ForbidConcurrent
+	CronJobRestartOnFailure        = corev1.RestartPolicyOnFailure
+	CronJobActiveDeadlineSeconds   = int64(300)
+	CronJobBackoffLimit            = int32(3)
+	CronJobSuccessHistoryLimit     = int32(3)
+	CronJobFailedHistoryLimit      = int32(3)
+	CronJobStartingDeadlineSeconds = int64(900)
+)
 
 func nonRootPodSC() *corev1.PodSecurityContext {
 	nonRoot := true

@@ -1978,6 +1978,7 @@ spec:
                   keycloakSync:
                     properties:
                       clientId:
+                        default: rbac-keycloak-sync
                         type: string
                       clientSecretRef:
                         description: SecretKeyRef points to a key inside a named Secret.
@@ -1997,6 +1998,7 @@ spec:
                       orgGroupPrefix:
                         type: string
                       pruneOrphans:
+                        default: true
                         type: boolean
                       resources:
                         description: ResourceRequirements describes the compute resource

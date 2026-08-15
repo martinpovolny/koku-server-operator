@@ -84,3 +84,51 @@ func TestRBACEnvDefaultsCachePort(t *testing.T) {
 		t.Errorf("REDIS_PORT = %q, want default 6379 when spec.cache.port is unset", redisPort)
 	}
 }
+
+func TestRBACAPIService(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns-rbac"},
+	}
+	svc := RBACAPIService(cfg)
+	if svc.Name != "test-rbac-api" {
+		t.Errorf("Name = %q, want test-rbac-api", svc.Name)
+	}
+	if svc.Namespace != "ns-rbac" {
+		t.Errorf("Namespace = %q, want ns-rbac", svc.Namespace)
+	}
+	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
+		t.Errorf("Ports = %v, want single port 8080", svc.Spec.Ports)
+	}
+	if len(svc.Labels) == 0 {
+		t.Error("Labels should not be empty")
+	}
+	if len(svc.Spec.Selector) == 0 {
+		t.Error("Selector should not be empty")
+	}
+}
+
+func TestRBACWorkerDeployment(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			RBAC: costv1alpha1.RBACConfig{
+				Image: costv1alpha1.ImageSpec{Repository: "quay.io/test/rbac", Tag: "v1"},
+			},
+		},
+	}
+
+	dep := RBACWorkerDeployment(cfg)
+	if dep.Name != "test-rbac-worker" {
+		t.Errorf("Name = %q, want test-rbac-worker", dep.Name)
+	}
+	if len(dep.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(dep.Spec.Template.Spec.Containers))
+	}
+	c := dep.Spec.Template.Spec.Containers[0]
+	if c.Image != "quay.io/test/rbac:v1" {
+		t.Errorf("Image = %q", c.Image)
+	}
+	if c.Command[0] != "celery" {
+		t.Errorf("Command = %v, want celery", c.Command)
+	}
+}

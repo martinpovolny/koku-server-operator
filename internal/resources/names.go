@@ -199,6 +199,14 @@ func NameRBACWorker(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-rbac-worker"
 }
 
+func NameRBACKeycloakSync(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-rbac-keycloak-sync"
+}
+
+func NameRBACKeycloakSyncConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	return cfg.Name + "-rbac-keycloak-sync-script"
+}
+
 func NameROSAPI(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return cfg.Name + "-ros-api"
 }

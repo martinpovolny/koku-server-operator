@@ -309,9 +309,6 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 	if threshold == "" {
 		threshold = "16"
 	}
-	concurrencyForbid := batchv1.ForbidConcurrent
-	onFailure := corev1.RestartPolicyOnFailure
-
 	cfgVol, cfgMount := kruizeConfigVolumeAndMount(cfg)
 
 	env := kruizeEnv(cfg, true)
@@ -330,13 +327,13 @@ func KruizeDeletePartitionsCronJob(cfg *costv1alpha1.CostManagementServiceConfig
 		},
 		Spec: batchv1.CronJobSpec{
 			Schedule:          schedule,
-			ConcurrencyPolicy: concurrencyForbid,
+			ConcurrencyPolicy: CronJobConcurrencyForbid,
 			JobTemplate: batchv1.JobTemplateSpec{
 				Spec: batchv1.JobSpec{
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, "ros-optimization-maintenance")},
 						Spec: corev1.PodSpec{
-							RestartPolicy:    onFailure,
+							RestartPolicy:    CronJobRestartOnFailure,
 							SecurityContext:  nonRootPodSC(),
 							ImagePullSecrets: imagePullSecrets(cfg),
 							Containers: []corev1.Container{{

@@ -579,6 +579,26 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 		}
 	}
 
+	// RBAC Keycloak-to-RBAC principal sync CronJob.
+	if cfg.Spec.RBAC.KeycloakSync.Enabled {
+		if cfg.Spec.RBAC.KeycloakSync.ClientSecretRef.Name == "" {
+			return Result{}, fmt.Errorf("rbac.keycloakSync.clientSecretRef.name is required when keycloakSync is enabled")
+		}
+		objs = append(objs,
+			resources.KeycloakSyncConfigMap(cfg),
+			resources.KeycloakSyncCronJob(cfg),
+		)
+	} else {
+		for _, obj := range []client.Object{
+			resources.KeycloakSyncCronJob(cfg),
+			resources.KeycloakSyncConfigMap(cfg),
+		} {
+			if err := r.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) {
+				return Result{}, fmt.Errorf("delete keycloak-sync %s: %w", obj.GetName(), err)
+			}
+		}
+	}
+
 	// Ingress upload handler — must be deployed before reconcileEdge so the
 	// Envoy gateway has a live backend for /api/ingress/ routes.
 	objs = append(objs,

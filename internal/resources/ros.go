@@ -571,8 +571,6 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 	if schedule == "" {
 		schedule = "0 0 */15 * *"
 	}
-	onFailure := corev1.RestartPolicyOnFailure
-
 	env := rosDBEnv(cfg)
 	env = append(env,
 		EnvVal("SERVICE_NAME", "ros-housekeeper-partition"),
@@ -594,7 +592,7 @@ func ROSPartitionCleanerCronJob(cfg *costv1alpha1.CostManagementServiceConfig) *
 						ObjectMeta: metav1.ObjectMeta{Labels: Labels(cfg, "ros-database-maintenance")},
 						Spec: corev1.PodSpec{
 							ServiceAccountName: NameROSServiceAccount(cfg),
-							RestartPolicy:      onFailure,
+							RestartPolicy:      CronJobRestartOnFailure,
 							SecurityContext:    nonRootPodSC(),
 							ImagePullSecrets:   imagePullSecrets(cfg),
 							Containers: []corev1.Container{{
