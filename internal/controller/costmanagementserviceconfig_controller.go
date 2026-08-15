@@ -666,19 +666,25 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 	}
 
 	// NetworkPolicies — restrict traffic to expected flows per component.
-	nps := []client.Object{
+	netpols := []client.Object{
 		resources.GatewayNetworkPolicy(cfg),
 		resources.IngressNetworkPolicy(cfg),
 		resources.RBACAPINetworkPolicy(cfg),
 		resources.KokuAPINetworkPolicy(cfg),
 	}
 	if costv1alpha1.ROSEnabled(cfg) {
-		nps = append(nps,
+		netpols = append(netpols,
 			resources.KruizeNetworkPolicy(cfg),
 			resources.ROSAPINetworkPolicy(cfg),
 		)
 	}
-	for _, np := range nps {
+	if costv1alpha1.BoolVal(cfg.Spec.Cache.Deploy, true) {
+		netpols = append(netpols, resources.CacheNetworkPolicy(cfg))
+	}
+	if costv1alpha1.BoolVal(cfg.Spec.Database.Deploy, true) {
+		netpols = append(netpols, resources.DatabaseNetworkPolicy(cfg))
+	}
+	for _, np := range netpols {
 		if err := r.apply(ctx, cfg, np); err != nil {
 			return Result{}, fmt.Errorf("networkpolicy %s: %w", np.GetName(), err)
 		}

@@ -1999,6 +1999,9 @@ spec:
                         type: string
                       pruneOrphans:
                         default: true
+                        description: |-
+                          PruneOrphans deletes RBAC Principals that no longer exist in the
+                          org's Keycloak group. Matches the Helm chart default (true).
                         type: boolean
                       resources:
                         description: ResourceRequirements describes the compute resource
