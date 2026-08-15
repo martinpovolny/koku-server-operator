@@ -127,33 +127,32 @@ contains resources like `consolelinks`, `clusterroles`,
 
 ## 7. Keycloak sync: mount CA bundle for private-CA Keycloak
 
-**Source:** Code review finding — pre-existing (applies when KeycloakSync is implemented).
+**Source:** Code review finding.
 
-**Problem:** When the Keycloak sync CronJob is implemented, the embedded
-Python script will need to verify TLS against Keycloak. If Keycloak uses a
-private CA (common on-prem), `ssl.create_default_context()` won't trust it.
-`KEYCLOAK_TLS_VERIFY` would follow `auth.keycloak.tls.insecureSkipVerify`,
-but `auth.keycloak.tls.caCertSecretName` is never mounted into the sync Job
-and the script has no `SSL_CERT_FILE` override.
+**Problem:** The Keycloak sync CronJob (now implemented in PR #53) verifies
+TLS against Keycloak. If Keycloak uses a private CA (common on-prem),
+`ssl.create_default_context()` won't trust it. `KEYCLOAK_TLS_VERIFY` follows
+`auth.keycloak.tls.insecureSkipVerify`, but `auth.keycloak.tls.caCertSecretName`
+is not mounted into the sync CronJob and the script has no `SSL_CERT_FILE`
+override.
 
 The Helm chart's CronJob template has the same gap.
 
 **Impact:** Private-CA Keycloak with `insecureSkipVerify=false` (the secure
-default) → CronJob auth failures. Users would have to set
-`insecureSkipVerify=true` as a workaround, defeating TLS verification.
+default) → CronJob auth failures. Users must set `insecureSkipVerify=true`
+as a workaround, defeating TLS verification.
 
-**Suggested fix:** When implementing the sync CronJob, mount the Keycloak CA
-Secret (or the combined CA bundle from CACombineInitContainer) and set
-`SSL_CERT_FILE` in the container env. Follow the same pattern used by the
-Envoy gateway and oauth2-proxy for Keycloak CA trust.
+**Suggested fix:** Mount the Keycloak CA Secret (or the combined CA bundle
+from CACombineInitContainer) and set `SSL_CERT_FILE` in the container env.
+Follow the same pattern used by the Envoy gateway and oauth2-proxy.
 
 ---
 
 ## 8. Keycloak sync: enable/disable lifecycle test
 
-**Source:** Code review finding — pre-existing (applies when KeycloakSync is implemented).
+**Source:** Code review finding.
 
-**Problem:** When the Keycloak sync CronJob is implemented, it needs a
+**Problem:** The Keycloak sync CronJob (now implemented in PR #53) needs a
 fake-client test covering the enable → apply → disable → delete lifecycle
 (same pattern as `TestKruizeCronJobDeletedWhenDisabled`). Without it,
 disabling the sync could leave orphaned CronJobs running.

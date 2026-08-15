@@ -1,7 +1,7 @@
 # Operator Task Tracker
 
 Tracks implementation status against the COST-7678–7700 Jira backlog.
-Last audited: 2026-08-09 against implementation in `internal/controller/` and `internal/resources/`.
+Last audited: 2026-08-15.
 
 ## Legend
 - ✅ Done — implements the ticket's acceptance criteria
@@ -40,9 +40,9 @@ Last audited: 2026-08-09 against implementation in `internal/controller/` and `i
 | [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | Implement application services | 🔄 | Koku API + Masu + Listener `1/1 Running` on CRC ✅, ROS API + Processor ✅ (optional via `spec.ros.enabled`), Kruize Deployment + Service + ClusterRole/Binding ✅ (gated with ROS), Bundled DB/Cache (dev-only extension) ✅. **Beta: ROS/Kruize not required** — see Beta scope below. Missing: profile-based sizing, 5-minute readiness timeout with Degraded condition. |
 | [COST-7687](https://redhat.atlassian.net/browse/COST-7687) | Implement workers and scheduled jobs | ✅ | Celery Beat + 10 workers ✅, ROS Processor + Recommendation Poller + Housekeeper ✅ (when `spec.ros.enabled`), ROS Partition Cleaner CronJob ✅, Kruize DeletePartitions CronJob ✅. Ticket's six on-prem queues all present. |
 | [COST-7688](https://redhat.atlassian.net/browse/COST-7688) | Implement Gateway and Ingress | ✅ | Envoy JWT proxy Deployment + Service + ConfigMap wired to OIDC issuer/audiences ✅, OpenShift Route for gateway API ✅, insights-ingress-go Deployment + Service ✅ (S3/Kafka/CA wiring, port 8080 matching Envoy backend config). |
-| [COST-7689](https://redhat.atlassian.net/browse/COST-7689) | Implement RBAC Service | ✅ | RBAC API Deployment + Service + RBAC Celery worker Deployment ✅. Deployed in Stage 4 before Koku. Both wired with rbac-user/rbac-password from DB credentials secret + cache env vars. |
+| [COST-7689](https://redhat.atlassian.net/browse/COST-7689) | Implement RBAC Service | ✅ | RBAC API Deployment + Service + RBAC Celery worker Deployment ✅. Deployed in Stage 4 before Koku. Both wired with rbac-user/rbac-password from DB credentials secret + cache env vars. Keycloak-to-RBAC principal sync CronJob + ConfigMap ✅ (PR #53). |
 | [COST-7690](https://redhat.atlassian.net/browse/COST-7690) | Implement UI and ConsoleLink | ✅ | UI Deployment (oauth2-proxy sidecar + nginx app container) ✅, ClusterIP Service with OpenShift service-CA TLS annotation ✅, UINginxConfigMap (proxies `/api/` to Envoy) ✅, operator-generated cookie Secret ✅, ConsoleLink (cluster-scoped, finalizer cleanup in `reconcileDelete`) ✅. UIRoute deferred to COST-7691. |
-| [COST-7691](https://redhat.atlassian.net/browse/COST-7691) | Implement Routes, NetworkPolicies, and TLS | ✅ | NetworkPolicies (gateway, ingress, kruize, rbac-api, koku-api) ✅, restricted-v2 SCC compliance (no hardcoded runAsUser, seccompProfile: RuntimeDefault) ✅, `status.phase → Ready` ✅, Gateway Route ✅, UI Route (deferred until cluster domain resolved) ✅. Dedicated SAs: koku, ros, kruize ✅. |
+| [COST-7691](https://redhat.atlassian.net/browse/COST-7691) | Implement Routes, NetworkPolicies, and TLS | ✅ | NetworkPolicies (gateway, ingress, kruize, rbac-api, koku-api, ros-api, cache, database) ✅, restricted-v2 SCC compliance (no hardcoded runAsUser, seccompProfile: RuntimeDefault) ✅, `status.phase → Ready` ✅, Gateway Route ✅, UI Route (deferred until cluster domain resolved) ✅. Dedicated SAs: koku, ros, kruize ✅. |
 | [COST-7692](https://redhat.atlassian.net/browse/COST-7692) | Implement monitoring and alerting | ✅ | Kubernetes Events (Ready, MigrationStarted/Complete/Failed, ReconcileError) ✅, AppServiceMonitor + KruizeServiceMonitor ✅, PrometheusRules (5 alert rules) ✅. All guarded by `spec.monitoring.enabled`. ServiceMonitors/Rules applied as unstructured — silently skipped when Prometheus Operator CRDs absent. |
 
 ## Lifecycle

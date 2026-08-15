@@ -18,6 +18,7 @@ existing external infrastructure (PostgreSQL, Kafka, S3, OIDC).
 | [docs/development/olm-bundle-testing.md](docs/development/olm-bundle-testing.md) | Build/push/run OLM bundle via `operator-sdk run bundle` |
 | [config/samples/byoi/README.md](config/samples/byoi/README.md) | BYOI fixture (Postgres, Valkey, Kafka, MinIO, OAuth mirror) |
 | [docs/tasks.md](docs/tasks.md) | Implementation status per JIRA ticket |
+| [docs/code-review-fixmes.md](docs/code-review-fixmes.md) | Open code review issues |
 | [docs/design/design-vs-jira.md](docs/design/design-vs-jira.md) | Design decisions and Kubernetes best-practice analysis |
 | [docs/jira/](docs/jira/) | JIRA ticket source (COST-7678–7700) |
 
@@ -34,26 +35,13 @@ See [docs/development/clusterbot.md](docs/development/clusterbot.md) for Cluster
 [docs/development/pre-prod-install.md](docs/development/pre-prod-install.md)
 for a full in-cluster BYOI + UI smoke.
 
-## API / CRD naming
-
-| Identifier | Value |
-|-----------|-------|
-| API group | `service.costmanagement.openshift.io` |
-| Version | `v1alpha1` |
-| Kind | `CostManagementServiceConfig` |
-| CRD name | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
-| Short name | `cmsc` |
-| `apiVersion` in CR | `service.costmanagement.openshift.io/v1alpha1` |
-| Operator install model | OwnNamespace — operator NS == CR NS ([docs](docs/development/ownnamespace.md)); `make deploy` scaffold NS is `koku-service-operator-system` |
-| Field manager | `koku-service-operator` |
-| Leader election ID | `costmanagementserviceconfigs.service.costmanagement.openshift.io` |
-| Finalizer | `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup` |
-
-Naming parallels the companion operator:
-`costmanagement-metrics-cfg.openshift.io` / `CostManagementMetricsConfig` / `cmmc`
+**CRD:** `service.costmanagement.openshift.io/v1alpha1` — Kind `CostManagementServiceConfig` (short name `cmsc`).
+Installs in OwnNamespace mode ([docs](docs/development/ownnamespace.md)).
 
 ## Project status
 
-Early development — core reconciler stages (infrastructure, DB migration, Koku
-API, Celery workers) are implemented and tested on CRC. See
-[docs/tasks.md](docs/tasks.md) for current status per ticket.
+Core reconciler, all application services (Koku, RBAC, ROS, Kruize, Ingress,
+Envoy, UI), Keycloak sync, BYOI fixtures, and multiple install paths (CRC,
+Cluster Bot, pre-prod) are implemented and tested. See
+[docs/tasks.md](docs/tasks.md) for per-ticket status and
+[docs/code-review-fixmes.md](docs/code-review-fixmes.md) for open issues.
