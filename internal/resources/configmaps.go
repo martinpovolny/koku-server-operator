@@ -97,7 +97,9 @@ func CACombineConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.C
 		Data: map[string]string{
 			"combine-ca.sh": `#!/bin/bash
 set -e
-cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /ca-source/*.crt > /ca-output/ca-bundle.crt 2>/dev/null || \
+EXTRA=""
+if ls /ca-extra/*.crt >/dev/null 2>&1; then EXTRA=/ca-extra/*.crt; fi
+cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /ca-source/*.crt $EXTRA > /ca-output/ca-bundle.crt 2>/dev/null || \
   cp /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /ca-output/ca-bundle.crt
 echo "CA bundle combined: $(wc -l < /ca-output/ca-bundle.crt) lines"
 `,

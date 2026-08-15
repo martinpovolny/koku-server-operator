@@ -379,6 +379,104 @@ func TestEnvoyDeploymentMountsKeycloakCACert(t *testing.T) {
 	}
 }
 
+func TestEnvoyInitMountsKeycloakCAAtCaExtra(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "my-router-ca"
+	dep := EnvoyDeployment(cfg)
+	if len(dep.Spec.Template.Spec.InitContainers) == 0 {
+		t.Fatal("missing prepare-ca-bundle init container")
+	}
+	init := dep.Spec.Template.Spec.InitContainers[0]
+	found := false
+	for _, m := range init.VolumeMounts {
+		if m.Name == "keycloak-ca" && m.MountPath == "/ca-extra" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("prepare-ca-bundle must mount keycloak-ca at /ca-extra so combine-ca.sh can merge it")
+	}
+}
+
+func TestEnvoyInitOmitsCaExtraWithoutCASecret(t *testing.T) {
+	cfg := testCfg()
+	dep := EnvoyDeployment(cfg)
+	init := dep.Spec.Template.Spec.InitContainers[0]
+	for _, m := range init.VolumeMounts {
+		if m.MountPath == "/ca-extra" {
+			t.Fatal("prepare-ca-bundle must not mount /ca-extra when caCertSecretName is empty")
+		}
+	}
+}
+
+func TestEnvoyYAMLSkipVerifyOmitsSANMatch(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.URL = "https://keycloak.apps.example.com"
+	cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify = true
+	y := EnvoyYAML(cfg)
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(y), &doc); err != nil {
+		t.Fatalf("EnvoyYAML is not valid YAML: %v", err)
+	}
+	vc := keycloakJWKSValidationContext(t, doc)
+	if got, _ := vc["trust_chain_verification"].(string); got != "ACCEPT_UNTRUSTED" {
+		t.Fatalf("trust_chain_verification = %v, want ACCEPT_UNTRUSTED", vc["trust_chain_verification"])
+	}
+	if _, ok := vc["match_typed_subject_alt_names"]; ok {
+		t.Fatal("SAN match must not be required when skipping verify")
+	}
+}
+
+func TestEnvoyYAMLCASecretWinsOverSkipVerify(t *testing.T) {
+	cfg := testCfg()
+	cfg.Spec.Auth.Keycloak.URL = "https://keycloak.apps.example.com"
+	cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify = true
+	cfg.Spec.Auth.Keycloak.TLS.CACertSecretName = "my-router-ca"
+	y := EnvoyYAML(cfg)
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(y), &doc); err != nil {
+		t.Fatalf("EnvoyYAML is not valid YAML: %v", err)
+	}
+	vc := keycloakJWKSValidationContext(t, doc)
+	if _, ok := vc["trust_chain_verification"]; ok {
+		t.Fatal("caCertSecretName must win over insecureSkipVerify")
+	}
+	trusted, ok := vc["trusted_ca"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected trusted_ca map, got %T", vc["trusted_ca"])
+	}
+	if trusted["filename"] != "/etc/ca-certificates/ca-bundle.crt" {
+		t.Fatalf("trusted_ca.filename = %v", trusted["filename"])
+	}
+}
+
+func keycloakJWKSValidationContext(t *testing.T, doc map[string]any) map[string]any {
+	t.Helper()
+	clusters, ok := yamlWalk(doc, "static_resources", "clusters").([]any)
+	if !ok {
+		t.Fatalf("clusters is %T", yamlWalk(doc, "static_resources", "clusters"))
+	}
+	var cluster map[string]any
+	for _, c := range clusters {
+		m, ok := c.(map[string]any)
+		if ok && m["name"] == "keycloak_jwks" {
+			cluster = m
+			break
+		}
+	}
+	if cluster == nil {
+		t.Fatal("keycloak_jwks cluster not found")
+	}
+	vc := yamlWalk(cluster, "transport_socket", "typed_config", "common_tls_context", "validation_context")
+	m, ok := vc.(map[string]any)
+	if !ok {
+		t.Fatalf("validation_context is %T (%v)", vc, vc)
+	}
+	return m
+}
+
 // TestEnvoyYAMLRejectsInjectedAudience verifies that audience values containing
 // control characters cannot inject YAML structure into Envoy's JWT filter config.
 // Without escaping, a line-breaking control character breaks out of the audience
