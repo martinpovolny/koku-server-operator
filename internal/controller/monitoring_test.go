@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
+	"github.com/project-koku/koku-service-operator/internal/resources"
 )
 
 // TestMonitoringRealApplyErrorSurfaces verifies that non-CRD-absent errors
@@ -91,5 +92,86 @@ func TestMonitoringCRDAbsentSkipsResource(t *testing.T) {
 	}
 	if !result.IsZero() {
 		t.Errorf("reconcileMonitoring should return zero result on CRD-absent, got %+v", result)
+	}
+}
+
+func TestReconcileMonitoring_SkipsKruizeServiceMonitorWhenROSDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = costv1alpha1.AddToScheme(scheme)
+
+	cfg := minimalCR(testCRName, testNamespace)
+	var patched []string
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(_ context.Context, _ client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
+				patched = append(patched, obj.GetName())
+				return nil
+			},
+		}).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClient,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileMonitoring(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileMonitoring: %v", err)
+	}
+
+	kruizeSM := resources.KruizeServiceMonitor(cfg).GetName()
+	for _, name := range patched {
+		if name == kruizeSM {
+			t.Fatalf("patched Kruize ServiceMonitor %q with ros.enabled=false: %v", kruizeSM, patched)
+		}
+	}
+	appSM := resources.AppServiceMonitor(cfg).GetName()
+	foundApp := false
+	for _, name := range patched {
+		if name == appSM {
+			foundApp = true
+		}
+	}
+	if !foundApp {
+		t.Errorf("expected AppServiceMonitor %q to be applied, got %v", appSM, patched)
+	}
+}
+
+func TestReconcileMonitoring_AppliesKruizeServiceMonitorWhenROSEnabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = costv1alpha1.AddToScheme(scheme)
+
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	var patched []string
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(_ context.Context, _ client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
+				patched = append(patched, obj.GetName())
+				return nil
+			},
+		}).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClient,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileMonitoring(context.Background(), cfg); err != nil {
+		t.Fatalf("reconcileMonitoring: %v", err)
+	}
+
+	kruizeSM := resources.KruizeServiceMonitor(cfg).GetName()
+	found := false
+	for _, name := range patched {
+		if name == kruizeSM {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Kruize ServiceMonitor %q when ros.enabled=true, got %v", kruizeSM, patched)
 	}
 }

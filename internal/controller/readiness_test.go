@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -188,5 +189,24 @@ func TestJobConditionHelpers(t *testing.T) {
 				t.Errorf("isJobFailed = %v, want %v", got, tt.wantFailed)
 			}
 		})
+	}
+}
+
+func TestReadinessBackoff(t *testing.T) {
+	tests := []struct {
+		over time.Duration
+		want time.Duration
+	}{
+		{over: 0, want: requeueSlow},
+		{over: 20 * time.Second, want: requeueSlow},
+		{over: 60 * time.Second, want: time.Minute},
+		{over: 2 * time.Minute, want: 2 * time.Minute},
+		{over: 4 * time.Minute, want: requeueDrift},
+	}
+	for _, tt := range tests {
+		since := time.Now().Add(-(readinessTimeout + tt.over))
+		if got := readinessBackoff(since); got != tt.want {
+			t.Errorf("over=%v: backoff = %v, want %v", tt.over, got, tt.want)
+		}
 	}
 }

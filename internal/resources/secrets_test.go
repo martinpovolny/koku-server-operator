@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,5 +40,46 @@ func TestNameStorageSecretUsesUserProvided(t *testing.T) {
 	}
 	if got := NameStorageSecret(cfg); got != "my-s3-creds" {
 		t.Fatalf("NameStorageSecret = %q, want my-s3-creds", got)
+	}
+}
+
+func TestDjangoSecretKey_LengthAndCharset(t *testing.T) {
+	key := djangoSecretKey(50)
+	if len(key) != 50 {
+		t.Fatalf("djangoSecretKey length = %d, want 50", len(key))
+	}
+	for i, c := range key {
+		if !strings.ContainsRune(djangoKeyCharset, c) {
+			t.Fatalf("djangoSecretKey[%d] = %q not in charset %q", i, c, djangoKeyCharset)
+		}
+	}
+}
+
+func TestDjangoSecretKey_Unique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := range 20 {
+		key := djangoSecretKey(50)
+		if seen[key] {
+			t.Fatalf("djangoSecretKey collision on iteration %d", i)
+		}
+		seen[key] = true
+	}
+}
+
+func TestDjangoSecret_HoldsGeneratedKey(t *testing.T) {
+	cfg := testCfg()
+	sec := DjangoSecret(cfg)
+	if sec.Name != NameDjangoSecret(cfg) {
+		t.Errorf("name = %q, want %q", sec.Name, NameDjangoSecret(cfg))
+	}
+	if sec.Namespace != cfg.Namespace {
+		t.Errorf("namespace = %q", sec.Namespace)
+	}
+	key, ok := sec.StringData["secret-key"]
+	if !ok {
+		t.Fatal("DjangoSecret missing secret-key")
+	}
+	if len(key) != 50 {
+		t.Errorf("secret-key length = %d, want 50", len(key))
 	}
 }
