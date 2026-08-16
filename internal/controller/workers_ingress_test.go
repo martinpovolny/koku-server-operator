@@ -58,3 +58,60 @@ func TestReconcileWorkers_IngressReady(t *testing.T) {
 		t.Fatal("expected IngressReady=True")
 	}
 }
+
+func TestReconcileWorkers_ROSOn_WaitsForROSAPI(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileWorkers(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameIngress(cfg))
+
+	result, err := r.reconcileWorkers(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while ROS API is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForROSAPI" {
+		t.Fatalf("expected Available=False WaitingForROSAPI, got %+v", cond)
+	}
+}
+
+func TestReconcileWorkers_ROSOn_WaitsForROSProcessor(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileWorkers(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameIngress(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameROSAPI(cfg))
+
+	result, err := r.reconcileWorkers(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while ROS Processor is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForROSProcessor" {
+		t.Fatalf("expected Available=False WaitingForROSProcessor, got %+v", cond)
+	}
+}

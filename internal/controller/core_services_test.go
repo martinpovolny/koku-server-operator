@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -107,6 +109,8 @@ func TestReconcileCoreServices_ROSOff_APIReady(t *testing.T) {
 	}
 
 	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameMasu(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameListener(cfg))
 
 	result, err = r.reconcileCoreServices(context.Background(), cfg)
 	if err != nil {
@@ -121,6 +125,176 @@ func TestReconcileCoreServices_ROSOff_APIReady(t *testing.T) {
 	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
 	if cond == nil || cond.Reason != "KokuAvailable" {
 		t.Fatalf("expected Available reason KokuAvailable, got %+v", cond)
+	}
+}
+
+func TestReconcileCoreServices_WaitsForMasuAfterAPI(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while Masu is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForMasu" {
+		t.Fatalf("expected Available=False WaitingForMasu, got %+v", cond)
+	}
+}
+
+func TestReconcileCoreServices_WaitsForListenerAfterMasu(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameMasu(cfg))
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while Listener is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForListener" {
+		t.Fatalf("expected Available=False WaitingForListener, got %+v", cond)
+	}
+}
+
+func TestReconcileCoreServices_ROSOn_WaitsForKruize(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Spec.ROS.Enabled = boolPtr(true)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameMasu(cfg))
+	markDeploymentReady(t, c, testNamespace, resources.NameListener(cfg))
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while Kruize is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "WaitingForKruize" {
+		t.Fatalf("expected Available=False WaitingForKruize, got %+v", cond)
+	}
+}
+
+func TestReconcileCoreServices_MasuTimeoutSetsDegraded(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+
+	apimeta.RemoveStatusCondition(&cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	apimeta.SetStatusCondition(&cfg.Status.Conditions, metav1.Condition{
+		Type:               costv1alpha1.ConditionAvailable,
+		Status:             metav1.ConditionFalse,
+		Reason:             "WaitingForMasu",
+		Message:            "waiting for Masu",
+		LastTransitionTime: metav1.NewTime(time.Now().Add(-6 * time.Minute)),
+	})
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("timeout pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue after readiness timeout")
+	}
+	if result.RequeueAfter < requeueSlow {
+		t.Errorf("backoff RequeueAfter = %v, want at least %v", result.RequeueAfter, requeueSlow)
+	}
+	deg := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+	if deg == nil || deg.Status != metav1.ConditionTrue || deg.Reason != "DeploymentNotReady" {
+		t.Fatalf("expected Degraded=True DeploymentNotReady, got %+v", deg)
+	}
+	if !strings.Contains(strings.ToLower(deg.Message), "masu") {
+		t.Errorf("Degraded message %q should name Masu", deg.Message)
+	}
+	if cfg.Status.Phase != costv1alpha1.PhaseDegraded {
+		t.Errorf("Phase = %q, want %q", cfg.Status.Phase, costv1alpha1.PhaseDegraded)
+	}
+}
+
+func TestReconcileCoreServices_ReasonChangeResetsTimeoutClock(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	c := fakeClientPreservingStatus(scheme)
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+	if _, err := r.reconcileCoreServices(context.Background(), cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	markDeploymentReady(t, c, testNamespace, resources.NameKokuAPI(cfg))
+
+	// Stale API wait must not make Masu look like it already timed out.
+	apimeta.RemoveStatusCondition(&cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	apimeta.SetStatusCondition(&cfg.Status.Conditions, metav1.Condition{
+		Type:               costv1alpha1.ConditionAvailable,
+		Status:             metav1.ConditionFalse,
+		Reason:             "WaitingForAPI",
+		LastTransitionTime: metav1.NewTime(time.Now().Add(-6 * time.Minute)),
+	})
+
+	result, err := r.reconcileCoreServices(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("masu wait pass: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue while Masu is not ready")
+	}
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if cond == nil || cond.Reason != "WaitingForMasu" {
+		t.Fatalf("expected WaitingForMasu, got %+v", cond)
+	}
+	deg := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+	if deg != nil && deg.Status == metav1.ConditionTrue {
+		t.Fatalf("Degraded should stay unset when the not-ready component just changed, got %+v", deg)
 	}
 }
 

@@ -1,7 +1,7 @@
 # Operator Task Tracker
 
 Tracks implementation status against the COST-7678–7700 Jira backlog.
-Last audited: 2026-08-15.
+Last audited: 2026-08-16.
 
 ## Legend
 - ✅ Done — implements the ticket's acceptance criteria
@@ -37,7 +37,7 @@ Last audited: 2026-08-15.
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | Implement application services | 🔄 | Koku API + Masu + Listener `1/1 Running` on CRC ✅, ROS API + Processor ✅ (optional via `spec.ros.enabled`), Kruize Deployment + Service + ClusterRole/Binding ✅ (gated with ROS), Bundled DB/Cache (dev-only extension) ✅. **Beta: ROS/Kruize not required** — see Beta scope below. Missing: profile-based sizing, 5-minute readiness timeout with Degraded condition. |
+| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | Implement application services | 🔄 | Koku API + Masu + Listener ✅, ROS API + Processor ✅ (optional via `spec.ros.enabled`), Kruize Deployment + Service + ClusterRole/Binding ✅ (gated with ROS). Readiness: API/Masu/Listener (+ Kruize/ROS API/Processor when ROS on) gated with 5-minute timeout → `Degraded` + backoff ✅. **Beta: ROS/Kruize not required**. Remaining: profile-based sizing (COST-7678 G4). |
 | [COST-7687](https://redhat.atlassian.net/browse/COST-7687) | Implement workers and scheduled jobs | ✅ | Celery Beat + 10 workers ✅, ROS Processor + Recommendation Poller + Housekeeper ✅ (when `spec.ros.enabled`), ROS Partition Cleaner CronJob ✅, Kruize DeletePartitions CronJob ✅. Ticket's six on-prem queues all present. |
 | [COST-7688](https://redhat.atlassian.net/browse/COST-7688) | Implement Gateway and Ingress | ✅ | Envoy JWT proxy Deployment + Service + ConfigMap wired to OIDC issuer/audiences ✅, OpenShift Route for gateway API ✅, insights-ingress-go Deployment + Service ✅. `GatewayReady` (Envoy + Route) is independent of `AuthenticationReady` (OIDC probe) ✅. `IngressReady` gates Workers before Edge ✅. |
 | [COST-7689](https://redhat.atlassian.net/browse/COST-7689) | Implement RBAC Service | ✅ | RBAC API Deployment + Service + RBAC Celery worker Deployment ✅. Deployed in Stage 4 before Koku. Both wired with rbac-user/rbac-password from DB credentials secret + cache env vars. Keycloak-to-RBAC principal sync CronJob + ConfigMap ✅ (PR #53). |

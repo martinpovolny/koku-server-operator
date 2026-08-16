@@ -53,10 +53,11 @@ func serviceMonitor(cfg *costv1alpha1.CostManagementServiceConfig, name, portNam
 
 // AppServiceMonitor watches all application services that expose metrics on port 9000.
 func AppServiceMonitor(cfg *costv1alpha1.CostManagementServiceConfig) *unstructured.Unstructured {
-	return serviceMonitor(cfg, cfg.Name+"-app-metrics", "metrics", []string{
-		"cost-management-api", "cost-processor", "listener",
-		"ros-api", "ingress",
-	})
+	components := []string{"cost-management-api", "cost-processor", "listener", "ingress"}
+	if costv1alpha1.ROSEnabled(cfg) {
+		components = append(components, "ros-api")
+	}
+	return serviceMonitor(cfg, cfg.Name+"-app-metrics", "metrics", components)
 }
 
 // KruizeServiceMonitor watches Kruize which exposes metrics on port 8080.
