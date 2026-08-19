@@ -23,6 +23,8 @@ import (
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/resources"
+
+	stderrors "errors"
 )
 
 const (
@@ -298,6 +300,10 @@ func (r *CostManagementServiceConfigReconciler) reconcileInfrastructure(ctx cont
 			return Result{}, fmt.Errorf("database service: %w", err)
 		}
 		if err := r.applyStatefulSet(ctx, cfg, resources.DatabaseStatefulSet(cfg)); err != nil {
+			if stderrors.Is(err, ErrStorageConfigChanged) {
+				// VCT mismatch: condition already set, stop reconciliation to avoid overwriting it.
+				return Result{RequeueAfter: requeueFast}, nil
+			}
 			return Result{}, fmt.Errorf("database statefulset: %w", err)
 		}
 		// Gate: wait for the DB pod to be ready.
@@ -840,7 +846,8 @@ func (r *CostManagementServiceConfigReconciler) ensureServiceAccount(
 // applyStatefulSet applies a StatefulSet using Server-Side Apply (SSA).
 // VolumeClaimTemplates are immutable; if they differ from the existing
 // StatefulSet, we set a DatabaseReady=False condition with StorageConfigChanged
-// reason and skip the SSA apply, requiring manual intervention.
+// reason and skip the SSA apply, returning ErrStorageConfigChanged to signal
+// the caller to stop reconciliation before overwriting the condition.
 func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, desired *appsv1.StatefulSet) error {
 	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: desired.Namespace, Name: desired.Name}, existing)
@@ -856,15 +863,23 @@ func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Con
 		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
 			"StorageConfigChanged",
 			"PVC size or storageClass change detected in VolumeClaimTemplates; manual intervention required")
-		return nil
+		return ErrStorageConfigChanged
 	}
 
 	// Use SSA for all other mutable fields.
 	return r.apply(ctx, cfg, desired)
 }
 
+// ErrStorageConfigChanged signals that VolumeClaimTemplates differ and
+// reconciliation should stop to avoid overwriting the StorageConfigChanged condition.
+var ErrStorageConfigChanged = fmt.Errorf("storage config changed: VolumeClaimTemplates are immutable")
+
 // volumeClaimTemplatesEqual compares two VolumeClaimTemplate slices for equality
-// of the immutable fields: Name, StorageClassName, Resources.Requests, AccessModes.
+// of the immutable fields. It normalizes defaulted values per Kubernetes API
+// conventions before comparison to avoid false mismatches.
+// Compared fields: Name, StorageClassName, Resources (Requests & Limits),
+// AccessModes, VolumeMode, Selector, VolumeName, DataSource, DataSourceRef,
+// VolumeAttributesClassName.
 func volumeClaimTemplatesEqual(a, b []corev1.PersistentVolumeClaim) bool {
 	if len(a) != len(b) {
 		return false
@@ -886,24 +901,46 @@ func volumeClaimTemplatesEqual(a, b []corev1.PersistentVolumeClaim) bool {
 		if !accessModesEqual(a[i].Spec.AccessModes, b[i].Spec.AccessModes) {
 			return false
 		}
+		if !volumeModeEqual(a[i].Spec.VolumeMode, b[i].Spec.VolumeMode) {
+			return false
+		}
+		if !labelSelectorEqual(a[i].Spec.Selector, b[i].Spec.Selector) {
+			return false
+		}
+		if !volumeNameEqual(a[i].Spec.VolumeName, b[i].Spec.VolumeName) {
+			return false
+		}
+		if !dataSourceEqual(a[i].Spec.DataSource, b[i].Spec.DataSource) {
+			return false
+		}
+		if !dataSourceRefEqual(a[i].Spec.DataSourceRef, b[i].Spec.DataSourceRef) {
+			return false
+		}
+		if !volumeAttributesClassNameEqual(a[i].Spec.VolumeAttributesClassName, b[i].Spec.VolumeAttributesClassName) {
+			return false
+		}
 	}
 	return true
 }
 
 func resourceRequirementsEqual(a, b corev1.VolumeResourceRequirements) bool {
-	if a.Requests == nil && b.Requests == nil {
-		return true
-	}
-	if a.Requests == nil || b.Requests == nil {
+	// Compare both Requests and Limits, treating nil and empty as equivalent
+	// to handle Kubernetes API defaulting.
+	if !resourceListEqual(a.Requests, b.Requests) {
 		return false
 	}
-	for k, v := range a.Requests {
-		if v2, ok := b.Requests[k]; !ok || !v.Equal(v2) {
-			return false
-		}
+	if !resourceListEqual(a.Limits, b.Limits) {
+		return false
 	}
-	for k := range b.Requests {
-		if _, ok := a.Requests[k]; !ok {
+	return true
+}
+
+func resourceListEqual(a, b corev1.ResourceList) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if v2, ok := b[k]; !ok || !v.Equal(v2) {
 			return false
 		}
 	}
@@ -920,6 +957,103 @@ func accessModesEqual(a, b []corev1.PersistentVolumeAccessMode) bool {
 		}
 	}
 	return true
+}
+
+func volumeModeEqual(a, b *corev1.PersistentVolumeMode) bool {
+	// nil and Filesystem are equivalent per Kubernetes defaulting
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil && b != nil && *b == corev1.PersistentVolumeFilesystem {
+		return true
+	}
+	if b == nil && a != nil && *a == corev1.PersistentVolumeFilesystem {
+		return true
+	}
+	if a != nil && b != nil {
+		return *a == *b
+	}
+	return false
+}
+
+func labelSelectorEqual(a, b *metav1.LabelSelector) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if len(a.MatchLabels) != len(b.MatchLabels) {
+		return false
+	}
+	for k, v := range a.MatchLabels {
+		if v2, ok := b.MatchLabels[k]; !ok || v != v2 {
+			return false
+		}
+	}
+	if len(a.MatchExpressions) != len(b.MatchExpressions) {
+		return false
+	}
+	for i := range a.MatchExpressions {
+		if a.MatchExpressions[i].Key != b.MatchExpressions[i].Key ||
+			a.MatchExpressions[i].Operator != b.MatchExpressions[i].Operator {
+			return false
+		}
+		if len(a.MatchExpressions[i].Values) != len(b.MatchExpressions[i].Values) {
+			return false
+		}
+		for j := range a.MatchExpressions[i].Values {
+			if a.MatchExpressions[i].Values[j] != b.MatchExpressions[i].Values[j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func volumeNameEqual(a, b string) bool {
+	// Empty string and nil are equivalent (Kubernetes treats unset as empty)
+	return a == b
+}
+
+func dataSourceEqual(a, b *corev1.TypedLocalObjectReference) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return ptrEqual(a.APIGroup, b.APIGroup) && a.Kind == b.Kind && a.Name == b.Name
+}
+
+func dataSourceRefEqual(a, b *corev1.TypedObjectReference) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return ptrEqual(a.APIGroup, b.APIGroup) && a.Kind == b.Kind && a.Name == b.Name
+}
+
+func volumeAttributesClassNameEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func ptrEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // ensureSecret creates the secret only if it does not already exist.

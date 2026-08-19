@@ -67,7 +67,7 @@ func TestApplyStatefulSet_UpdatePreservesVolumeClaimTemplates(t *testing.T) {
 	// Attempt to change VCT size — applyStatefulSet must detect this and set condition.
 	desired.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse("99Gi")
 
-	if err := r.applyStatefulSet(context.Background(), cfg, desired); err != nil {
+	if err := r.applyStatefulSet(context.Background(), cfg, desired); err != nil && err != ErrStorageConfigChanged {
 		t.Fatalf("applyStatefulSet: %v", err)
 	}
 
@@ -484,4 +484,186 @@ func TestAccessModesEqual(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVolumeModeEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        *corev1.PersistentVolumeMode
+		b        *corev1.PersistentVolumeMode
+		expected bool
+	}{
+		{name: "both nil", a: nil, b: nil, expected: true},
+		{name: "nil vs Filesystem", a: nil, b: ptr(corev1.PersistentVolumeFilesystem), expected: true},
+		{name: "Filesystem vs nil", a: ptr(corev1.PersistentVolumeFilesystem), b: nil, expected: true},
+		{name: "both Filesystem", a: ptr(corev1.PersistentVolumeFilesystem), b: ptr(corev1.PersistentVolumeFilesystem), expected: true},
+		{name: "Block vs Filesystem", a: ptr(corev1.PersistentVolumeBlock), b: ptr(corev1.PersistentVolumeFilesystem), expected: false},
+		{name: "Filesystem vs Block", a: ptr(corev1.PersistentVolumeFilesystem), b: ptr(corev1.PersistentVolumeBlock), expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := volumeModeEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("volumeModeEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLabelSelectorEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        *metav1.LabelSelector
+		b        *metav1.LabelSelector
+		expected bool
+	}{
+		{name: "both nil", a: nil, b: nil, expected: true},
+		{name: "one nil", a: nil, b: &metav1.LabelSelector{}, expected: false},
+		{name: "empty vs empty", a: &metav1.LabelSelector{}, b: &metav1.LabelSelector{}, expected: true},
+		{name: "equal matchLabels", a: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}}, b: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}}, expected: true},
+		{name: "different matchLabels", a: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}}, b: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}, expected: false},
+		{name: "equal matchExpressions", a: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}}}}, b: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}}}}, expected: true},
+		{name: "different matchExpressions", a: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}}}}, b: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"dev"}}}}, expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := labelSelectorEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("labelSelectorEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestVolumeNameEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        string
+		b        string
+		expected bool
+	}{
+		{name: "both empty", a: "", b: "", expected: true},
+		{name: "equal", a: "pvc-123", b: "pvc-123", expected: true},
+		{name: "different", a: "pvc-123", b: "pvc-456", expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := volumeNameEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("volumeNameEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// nolint:dupl
+func TestDataSourceEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        *corev1.TypedLocalObjectReference
+		b        *corev1.TypedLocalObjectReference
+		expected bool
+	}{
+		{name: "both nil", a: nil, b: nil, expected: true},
+		{name: "one nil", a: nil, b: &corev1.TypedLocalObjectReference{}, expected: false},
+		{name: "equal", a: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
+		{name: "different name", a: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedLocalObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-2"}, expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dataSourceEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("dataSourceEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// nolint:dupl
+func TestDataSourceRefEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        *corev1.TypedObjectReference
+		b        *corev1.TypedObjectReference
+		expected bool
+	}{
+		{name: "both nil", a: nil, b: nil, expected: true},
+		{name: "one nil", a: nil, b: &corev1.TypedObjectReference{}, expected: false},
+		{name: "equal", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, expected: true},
+		{name: "different kind", a: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "VolumeSnapshot", Name: "snap-1"}, b: &corev1.TypedObjectReference{APIGroup: ptr(""), Kind: "PVC", Name: "snap-1"}, expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dataSourceRefEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("dataSourceRefEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestVolumeAttributesClassNameEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        *string
+		b        *string
+		expected bool
+	}{
+		{name: "both nil", a: nil, b: nil, expected: true},
+		{name: "one nil", a: nil, b: ptr("class-1"), expected: false},
+		{name: "equal", a: ptr("class-1"), b: ptr("class-1"), expected: true},
+		{name: "different", a: ptr("class-1"), b: ptr("class-2"), expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := volumeAttributesClassNameEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("volumeAttributesClassNameEqual() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestReconcileInfrastructure_VCTMismatchOnReadyDB(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+	cfg.Spec.Cache.Deploy = boolPtr(false)
+
+	// Pre-create a ready StatefulSet with 10Gi storage
+	existing := resources.DatabaseStatefulSet(cfg)
+	existing.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse("10Gi")
+	replicas := int32(1)
+	existing.Spec.Replicas = &replicas
+
+	// Mark the DB as ready in status so reconcileInfrastructure would normally set DatabaseAvailable
+	c := fakeClientPreservingStatus(scheme, existing)
+	markStatefulSetReady(t, c, testNamespace, resources.NameDatabase(cfg))
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   c,
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+
+	// Simulate user changing storage size to 20Gi in spec
+	cfg.Spec.Database.Storage.Size = resource.MustParse("20Gi")
+
+	result, err := r.reconcileInfrastructure(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("reconcileInfrastructure: %v", err)
+	}
+
+	// Should requeue and NOT overwrite StorageConfigChanged condition
+	if result.RequeueAfter == 0 {
+		t.Fatal("expected requeue on VCT mismatch")
+	}
+
+	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "StorageConfigChanged" {
+		t.Fatalf("expected DatabaseReady=False StorageConfigChanged, got %+v", cond)
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
