@@ -37,17 +37,6 @@ const (
 	requeueFast    = 10 * time.Second
 	requeueSlow    = 30 * time.Second
 	requeueDrift   = 5 * time.Minute
-
-	// Status condition reasons shared with tests so the strings cannot drift.
-	reasonWaitingForRBAC       = "WaitingForRBAC"
-	reasonRBACAvailable        = "RBACAvailable"
-	reasonWaitingForRBACWorker = "WaitingForRBACWorker"
-	reasonRBACWorkerAvailable  = "RBACWorkerAvailable"
-	reasonWaitingForAPI        = "WaitingForAPI"
-	reasonKokuAvailable        = "KokuAvailable"
-	msgWaitingForRBACAPI       = "waiting for RBAC API"
-	msgWaitingForRBACWorker    = "waiting for RBAC worker"
-	msgWaitingForKokuAPI       = "waiting for Koku API"
 )
 
 type CostManagementServiceConfigReconciler struct {
@@ -541,44 +530,19 @@ func (r *CostManagementServiceConfigReconciler) reconcileCoreServices(ctx contex
 		}
 	}
 
-	// RBAC worker is independent of Available: surface it as its own
-	// condition so a down worker is not hidden behind RBACReady=True.
-	workerReady, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameRBACWorker(cfg))
-	if err != nil {
-		return Result{}, err
-	}
-	if !workerReady {
-		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionFalse, reasonWaitingForRBACWorker, msgWaitingForRBACWorker)
-	} else {
-		r.setCondition(cfg, costv1alpha1.ConditionRBACWorkerReady, metav1.ConditionTrue, reasonRBACWorkerAvailable, "")
-	}
-
-	// Gate on the RBAC API (not the worker). Koku and Envoy call this
-	// service for authorization; do not report Available while it is down.
-	rbacReady, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameRBACAPI(cfg))
-	if err != nil {
-		return Result{}, err
-	}
-	if !rbacReady {
-		r.setCondition(cfg, costv1alpha1.ConditionRBACReady, metav1.ConditionFalse, reasonWaitingForRBAC, msgWaitingForRBACAPI)
-		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, reasonWaitingForRBAC, msgWaitingForRBACAPI)
-		return Result{RequeueAfter: requeueSlow}, nil
-	}
-	r.setCondition(cfg, costv1alpha1.ConditionRBACReady, metav1.ConditionTrue, reasonRBACAvailable, "")
-
 	// Gate on the API being available.
 	ready, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameKokuAPI(cfg))
 	if err != nil {
 		return Result{}, err
 	}
 	if !ready {
-		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, reasonWaitingForAPI, msgWaitingForKokuAPI)
+		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, "WaitingForAPI", "waiting for Koku API")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
 		r.Recorder.Event(cfg, corev1.EventTypeNormal, "CoreServicesAvailable", "Koku API is ready")
 	}
-	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, reasonKokuAvailable, "")
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "KokuAvailable", "")
 	return Result{}, nil
 }
 
@@ -659,17 +623,6 @@ func (r *CostManagementServiceConfigReconciler) reconcileWorkers(ctx context.Con
 		}
 	}
 
-	ready, err := r.isDeploymentReady(ctx, cfg.Namespace, resources.NameIngress(cfg))
-	if err != nil {
-		return Result{}, err
-	}
-	if !ready {
-		r.setCondition(cfg, costv1alpha1.ConditionIngressReady, metav1.ConditionFalse,
-			"WaitingForIngress", "waiting for Ingress upload Deployment")
-		return Result{RequeueAfter: requeueSlow}, nil
-	}
-	r.setCondition(cfg, costv1alpha1.ConditionIngressReady, metav1.ConditionTrue,
-		"IngressReady", "Ingress upload Deployment is ready")
 	return Result{}, nil
 }
 
@@ -705,18 +658,18 @@ func (r *CostManagementServiceConfigReconciler) reconcileEdge(ctx context.Contex
 		return Result{}, err
 	}
 	if !ready {
-		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
 			"WaitingForGateway", "waiting for Envoy gateway Deployment")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
 	if route == nil {
-		r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
+		r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionFalse,
 			"ClusterDomainPending", "Envoy gateway ready; API Route deferred until cluster domain is available")
 		return Result{RequeueAfter: requeueSlow}, nil
 	}
 
-	r.setCondition(cfg, costv1alpha1.ConditionGatewayReady, metav1.ConditionTrue,
+	r.setCondition(cfg, costv1alpha1.ConditionAuthReady, metav1.ConditionTrue,
 		"GatewayReady", "Envoy JWT gateway and API Route are ready")
 
 	if err := r.reconcileUI(ctx, cfg); err != nil {
@@ -884,29 +837,89 @@ func (r *CostManagementServiceConfigReconciler) ensureServiceAccount(
 	return r.apply(ctx, cfg, sa)
 }
 
-// applyStatefulSet applies a StatefulSet, handling the VolumeClaimTemplate
-// immutability constraint by creating on first call and only patching spec
-// (not VCT) on subsequent calls.
+// applyStatefulSet applies a StatefulSet using Server-Side Apply (SSA).
+// VolumeClaimTemplates are immutable; if they differ from the existing
+// StatefulSet, we set a DatabaseReady=False condition with StorageConfigChanged
+// reason and skip the SSA apply, requiring manual intervention.
 func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, desired *appsv1.StatefulSet) error {
 	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: desired.Namespace, Name: desired.Name}, existing)
 	if errors.IsNotFound(err) {
-		setOwnerRef(cfg, desired)
-		return r.Create(ctx, desired)
+		return r.apply(ctx, cfg, desired)
 	}
 	if err != nil {
 		return err
 	}
-	// Only update mutable fields (replicas, container image, resources, pull secrets).
-	patch := existing.DeepCopy()
-	patch.Spec.Replicas = desired.Spec.Replicas
-	patch.Spec.Template.Spec.ImagePullSecrets = desired.Spec.Template.Spec.ImagePullSecrets
-	if len(patch.Spec.Template.Spec.Containers) > 0 && len(desired.Spec.Template.Spec.Containers) > 0 {
-		patch.Spec.Template.Spec.Containers[0].Image = desired.Spec.Template.Spec.Containers[0].Image
-		patch.Spec.Template.Spec.Containers[0].Resources = desired.Spec.Template.Spec.Containers[0].Resources
-		patch.Spec.Template.Spec.Containers[0].Env = desired.Spec.Template.Spec.Containers[0].Env
+
+	// Check if VolumeClaimTemplates differ (immutable field).
+	if !volumeClaimTemplatesEqual(existing.Spec.VolumeClaimTemplates, desired.Spec.VolumeClaimTemplates) {
+		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
+			"StorageConfigChanged",
+			"PVC size or storageClass change detected in VolumeClaimTemplates; manual intervention required")
+		return nil
 	}
-	return r.Update(ctx, patch)
+
+	// Use SSA for all other mutable fields.
+	return r.apply(ctx, cfg, desired)
+}
+
+// volumeClaimTemplatesEqual compares two VolumeClaimTemplate slices for equality
+// of the immutable fields: Name, StorageClassName, Resources.Requests, AccessModes.
+func volumeClaimTemplatesEqual(a, b []corev1.PersistentVolumeClaim) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name {
+			return false
+		}
+		if a[i].Spec.StorageClassName != nil && b[i].Spec.StorageClassName != nil {
+			if *a[i].Spec.StorageClassName != *b[i].Spec.StorageClassName {
+				return false
+			}
+		} else if (a[i].Spec.StorageClassName == nil) != (b[i].Spec.StorageClassName == nil) {
+			return false
+		}
+		if !resourceRequirementsEqual(a[i].Spec.Resources, b[i].Spec.Resources) {
+			return false
+		}
+		if !accessModesEqual(a[i].Spec.AccessModes, b[i].Spec.AccessModes) {
+			return false
+		}
+	}
+	return true
+}
+
+func resourceRequirementsEqual(a, b corev1.VolumeResourceRequirements) bool {
+	if a.Requests == nil && b.Requests == nil {
+		return true
+	}
+	if a.Requests == nil || b.Requests == nil {
+		return false
+	}
+	for k, v := range a.Requests {
+		if v2, ok := b.Requests[k]; !ok || !v.Equal(v2) {
+			return false
+		}
+	}
+	for k := range b.Requests {
+		if _, ok := a.Requests[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func accessModesEqual(a, b []corev1.PersistentVolumeAccessMode) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ensureSecret creates the secret only if it does not already exist.
