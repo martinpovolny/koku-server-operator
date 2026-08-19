@@ -215,6 +215,7 @@ func TestApplyStatefulSet_SSADriftCorrection(t *testing.T) {
 	probe := got.Spec.Template.Spec.Containers[0].LivenessProbe
 	if probe == nil {
 		t.Fatal("livenessProbe is nil after drift correction")
+		return
 	}
 	if probe.Exec == nil || len(probe.Exec.Command) == 0 || probe.Exec.Command[0] != "/bin/sh" {
 		t.Errorf("livenessProbe not reverted to desired state: got %+v", probe)
