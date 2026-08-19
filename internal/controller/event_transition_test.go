@@ -90,7 +90,7 @@ func TestCoreServicesAvailableEvent_GuardLogic(t *testing.T) {
 	if !apimeta.IsStatusConditionTrue(cfg.Status.Conditions, costv1alpha1.ConditionAvailable) {
 		r.Recorder.Event(cfg, "Normal", "CoreServicesAvailable", "Koku API is ready")
 	}
-	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, "KokuAvailable", "")
+	r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionTrue, reasonKokuAvailable, "")
 	assertEvent(t, rec, "CoreServicesAvailable")
 
 	// Simulate second pass: Available already True → no Event.

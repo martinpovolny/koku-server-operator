@@ -97,9 +97,34 @@ func CACombineConfigMap(cfg *costv1alpha1.CostManagementServiceConfig) *corev1.C
 		Data: map[string]string{
 			"combine-ca.sh": `#!/bin/bash
 set -e
-cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /ca-source/*.crt > /ca-output/ca-bundle.crt 2>/dev/null || \
-  cp /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /ca-output/ca-bundle.crt
-echo "CA bundle combined: $(wc -l < /ca-output/ca-bundle.crt) lines"
+
+if [ -f /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ]; then
+  cat /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem > /ca-output/ca-bundle.crt
+elif [ -f /etc/ssl/certs/ca-bundle.crt ]; then
+  cat /etc/ssl/certs/ca-bundle.crt > /ca-output/ca-bundle.crt
+elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+  cat /etc/ssl/certs/ca-certificates.crt > /ca-output/ca-bundle.crt
+else
+  touch /ca-output/ca-bundle.crt
+fi
+
+if [ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]; then
+  echo "" >> /ca-output/ca-bundle.crt
+  cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt >> /ca-output/ca-bundle.crt
+fi
+
+if [ -f /ca-source/service-ca.crt ] && [ -s /ca-source/service-ca.crt ]; then
+  echo "" >> /ca-output/ca-bundle.crt
+  cat /ca-source/service-ca.crt >> /ca-output/ca-bundle.crt
+fi
+
+for cert in /ca-extra/*.crt; do
+  [ -f "$cert" ] && [ -s "$cert" ] || continue
+  echo "" >> /ca-output/ca-bundle.crt
+  cat "$cert" >> /ca-output/ca-bundle.crt
+done
+
+echo "CA bundle combined: $(grep -c 'BEGIN CERTIFICATE' /ca-output/ca-bundle.crt 2>/dev/null || echo 0) certificates"
 `,
 		},
 	}

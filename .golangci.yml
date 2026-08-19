@@ -69,6 +69,11 @@ linters:
       # actual values under test, not code duplication.
       - linters: [errcheck, gosec, unparam, goconst, gocyclo]
         path: _test\.go
+      # SA5011: staticcheck on Go <1.26 does not recognize t.Fatal as noreturn,
+      # so `if x == nil { t.Fatal(...) }; x.Field` triggers a false positive.
+      - linters: [staticcheck]
+        path: _test\.go
+        text: SA5011
       # test/utils uses kubectl exec with variable args by design
       - linters: [gosec]
         path: test/

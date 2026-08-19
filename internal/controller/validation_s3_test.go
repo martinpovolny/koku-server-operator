@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"net"
 	"net/http"
@@ -87,7 +89,7 @@ func TestS3ListBucketsProbe(t *testing.T) {
 	t.Run("reachable", func(t *testing.T) {
 		srv := httptest.NewServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
 		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second); err != nil {
+		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err != nil {
 			t.Fatalf("expected success, got %v", err)
 		}
 	})
@@ -95,13 +97,13 @@ func TestS3ListBucketsProbe(t *testing.T) {
 	t.Run("403 AccessDenied", func(t *testing.T) {
 		srv := httptest.NewServer(fakeS3ListBuckets(http.StatusForbidden, `<Error><Code>AccessDenied</Code><Message>denied</Message></Error>`))
 		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second); err == nil {
+		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
 			t.Fatal("expected error for HTTP 403")
 		}
 	})
 
 	t.Run("unreachable", func(t *testing.T) {
-		if err := s3ListBucketsProbe(ctx, "http://"+localHost+":1", "us-east-1", s3TestAccessKey, s3TestSecretKey, 200*time.Millisecond); err == nil {
+		if err := s3ListBucketsProbe(ctx, "http://"+localHost+":1", "us-east-1", s3TestAccessKey, s3TestSecretKey, 200*time.Millisecond, false, nil); err == nil {
 			t.Fatal("expected error for unreachable endpoint")
 		}
 	})
@@ -109,13 +111,31 @@ func TestS3ListBucketsProbe(t *testing.T) {
 	t.Run("tls verify failure", func(t *testing.T) {
 		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
 		t.Cleanup(srv.Close)
-		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second); err == nil {
+		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
 			t.Fatal("expected TLS error")
 		}
 	})
 
+	t.Run("tls insecure skip verify", func(t *testing.T) {
+		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+		t.Cleanup(srv.Close)
+		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, true, nil); err != nil {
+			t.Fatalf("expected success with insecureSkipVerify, got %v", err)
+		}
+	})
+
+	t.Run("tls custom CA cert", func(t *testing.T) {
+		srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+		t.Cleanup(srv.Close)
+		pool := x509.NewCertPool()
+		pool.AddCert(srv.Certificate())
+		if err := s3ListBucketsProbe(ctx, srv.URL, "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, pool); err != nil {
+			t.Fatalf("expected success with custom CA, got %v", err)
+		}
+	})
+
 	t.Run("endpoint missing scheme", func(t *testing.T) {
-		if err := s3ListBucketsProbe(ctx, "s3.example.svc:443", "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second); err == nil {
+		if err := s3ListBucketsProbe(ctx, "s3.example.svc:443", "us-east-1", s3TestAccessKey, s3TestSecretKey, time.Second, false, nil); err == nil {
 			t.Fatal("expected error for endpoint without scheme")
 		}
 	})
@@ -225,5 +245,121 @@ func TestReconcileValidation_S3ListBucketsDiscovered(t *testing.T) {
 	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
 	if found == nil || found.Status != metav1.ConditionTrue || found.Reason != "StorageReachable" {
 		t.Fatalf("expected StorageReady=True StorageReachable for discovered S3, got %+v", found)
+	}
+}
+
+func TestReconcileValidation_S3CACertSecretMissing(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+	useSSL := true
+	cfg.Spec.ObjectStorage = costv1alpha1.ObjectStorageConfig{
+		Endpoint:         localHost,
+		Port:             443,
+		UseSSL:           &useSSL,
+		SecretName:       s3TestSecret,
+		CACertSecretName: "no-such-ca",
+		S3:               costv1alpha1.S3Options{Region: "us-east-1"},
+	}
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("expected StorageReady=False, got %+v", found)
+	}
+	if found.Reason != "StorageCACertInvalid" {
+		t.Errorf("reason = %q, want StorageCACertInvalid", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3CACertInvalidPEM(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+	useSSL := true
+	cfg.Spec.ObjectStorage = costv1alpha1.ObjectStorageConfig{
+		Endpoint:         localHost,
+		Port:             443,
+		UseSSL:           &useSSL,
+		SecretName:       s3TestSecret,
+		CACertSecretName: "bad-ca",
+		S3:               costv1alpha1.S3Options{Region: "us-east-1"},
+	}
+
+	badCASecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-ca", Namespace: testNamespace},
+		Data:       map[string][]byte{"ca.crt": []byte("not-a-pem")},
+	}
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret), badCASecret)
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionFalse {
+		t.Fatalf("expected StorageReady=False, got %+v", found)
+	}
+	if found.Reason != "StorageCACertInvalid" {
+		t.Errorf("reason = %q, want StorageCACertInvalid", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3InsecureSkipVerifyBypassesCACert(t *testing.T) {
+	srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+	t.Cleanup(srv.Close)
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.InsecureSkipVerify = true
+	cfg.Spec.ObjectStorage.CACertSecretName = "stale-ca-that-does-not-exist"
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret))
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionTrue {
+		t.Fatalf("expected StorageReady=True (insecureSkipVerify bypasses CA), got %+v", found)
+	}
+	if found.Reason != "StorageReachable" {
+		t.Errorf("reason = %q, want StorageReachable", found.Reason)
+	}
+}
+
+func TestReconcileValidation_S3CACertValid(t *testing.T) {
+	srv := httptest.NewTLSServer(fakeS3ListBuckets(http.StatusOK, listBucketsXML))
+	t.Cleanup(srv.Close)
+
+	caPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: srv.Certificate().Raw,
+	})
+
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec:       bundledNoKafkaSpec(),
+	}
+	cfg.Spec.ObjectStorage = objectStorageForServer(t, srv, s3TestSecret)
+	cfg.Spec.ObjectStorage.CACertSecretName = "s3-ca"
+
+	caSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s3-ca", Namespace: testNamespace},
+		Data:       map[string][]byte{"ca.crt": caPEM},
+	}
+
+	r := newValidationReconciler(t, s3CredsSecret(s3TestSecret), caSecret)
+	_, _ = r.reconcileValidation(context.Background(), cfg)
+
+	found := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionStorageReady)
+	if found == nil || found.Status != metav1.ConditionTrue {
+		t.Fatalf("expected StorageReady=True with valid CA cert, got %+v", found)
+	}
+	if found.Reason != "StorageReachable" {
+		t.Errorf("reason = %q, want StorageReachable", found.Reason)
 	}
 }

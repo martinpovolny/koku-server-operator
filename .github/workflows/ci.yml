@@ -30,43 +30,7 @@ jobs:
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          # All known standard library vulnerabilities in go1.25.0.
-          # go mod tidy bumped go.mod from 1.24→1.25 when upgrading x/text and
-          # x/net to fix third-party CVEs; go1.25.0 itself has many stdlib vulns.
-          # TODO: remove suppressions after upgrading go.mod to go1.25.13+
-          SUPPRESSED="
-            GO-2025-4007 GO-2025-4008 GO-2025-4009 GO-2025-4010 GO-2025-4011
-            GO-2025-4012 GO-2025-4013 GO-2025-4155 GO-2025-4175
-            GO-2026-4337 GO-2026-4340 GO-2026-4341
-            GO-2026-4601 GO-2026-4602
-            GO-2026-4865 GO-2026-4870 GO-2026-4918
-            GO-2026-4946 GO-2026-4947 GO-2026-4971
-            GO-2026-5026 GO-2026-5037 GO-2026-5038 GO-2026-5039 GO-2026-5856
-            GO-2026-5972
-            GO-2026-6088 GO-2026-6089 GO-2026-6090 GO-2026-6218
-          "
-          set +e
-          output=$(govulncheck ./... 2>&1)
-          rc=$?
-          echo "$output"
-          if [ $rc -eq 0 ]; then
-            exit 0
-          fi
-          # Extract every GO-XXXX-YYYY ID that govulncheck reported, then
-          # remove the suppressed ones. Anything left is an unsuppressed finding.
-          found=$(echo "$output" | grep -oE 'GO-[0-9]+-[0-9]+' | sort -u)
-          unsuppressed=""
-          for id in $found; do
-            if ! echo "$SUPPRESSED" | grep -qw "$id"; then
-              unsuppressed="$unsuppressed $id"
-            fi
-          done
-          if [ -z "$unsuppressed" ]; then
-            echo "::notice::govulncheck findings suppressed: $SUPPRESSED (go1.25.0 stdlib vulns, fixed in go1.25.13+)"
-            exit 0
-          fi
-          echo "::error::Unsuppressed vulnerabilities:$unsuppressed"
-          exit 1
+          govulncheck ./...
 
   hack-scripts:
     name: Hack Scripts
