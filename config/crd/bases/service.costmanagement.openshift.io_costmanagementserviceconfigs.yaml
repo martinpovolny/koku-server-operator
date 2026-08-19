@@ -1493,11 +1493,10 @@ spec:
                         type: string
                       termination:
                         default: edge
-                        description: |-
-                          Envoy's backend listener is plaintext HTTP, so only edge termination
-                          is valid — passthrough/reencrypt would break the TLS handshake.
                         enum:
                         - edge
+                        - passthrough
+                        - reencrypt
                         type: string
                     type: object
                 type: object
@@ -1837,25 +1836,12 @@ spec:
                 type: object
               objectStorage:
                 properties:
-                  caCertSecretName:
-                    description: |-
-                      CACertSecretName names a Secret with key ca.crt containing the CA
-                      certificate used to verify the S3 endpoint TLS. Required for on-prem
-                      S3 endpoints (MinIO, Ceph RGW, NooBaa HTTPS) using private CAs.
-                    type: string
                   endpoint:
                     default: s3.openshift-storage.svc.cluster.local
                     description: |-
                       S3 endpoint hostname (without protocol or port).
                       Auto-detected by the Discovery phase (OBC → NooBaa → user-provided).
                     type: string
-                  insecureSkipVerify:
-                    default: false
-                    description: |-
-                      InsecureSkipVerify disables TLS certificate verification for the S3
-                      endpoint. Use for dev/CRC setups with self-signed certs.
-                      Prefer CACertSecretName for production.
-                    type: boolean
                   port:
                     default: 443
                     format: int32
@@ -2022,9 +2008,6 @@ spec:
                         type: string
                       pruneOrphans:
                         default: true
-                        description: |-
-                          PruneOrphans deletes RBAC Principals that no longer exist in the
-                          org's Keycloak group. Matches the Helm chart default (true).
                         type: boolean
                       resources:
                         description: ResourceRequirements describes the compute resource
@@ -2727,8 +2710,7 @@ spec:
                   Conditions is the canonical status API.
                   Standard conditions: Available, Progressing, Degraded.
                   Component conditions: DatabaseReady, CacheReady, StorageReady,
-                  KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete,
-                  GatewayReady, IngressReady, UIReady.
+                  KafkaReady, AuthenticationReady, SchemaUpToDate, DiscoveryComplete.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

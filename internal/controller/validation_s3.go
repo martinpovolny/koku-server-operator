@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,13 +10,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 	"github.com/project-koku/koku-service-operator/internal/resources"
 )
-
-const caCertKey = "ca.crt"
 
 // validateObjectStorage checks S3 credentials then probes the object store.
 // Non-blocking: failures set StorageReady=False but do not gate Migration.
@@ -36,34 +34,24 @@ func (r *CostManagementServiceConfigReconciler) validateObjectStorage(ctx contex
 		return
 	}
 
-	secret, err := r.getSecret(ctx, cfg.Namespace, secretName, s3SecretKeys)
-	if err != nil {
+	if err := r.checkSecretKeys(ctx, cfg.Namespace, secretName, s3SecretKeys); err != nil {
 		r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
 			"StorageSecretInvalid", err.Error())
 		return
 	}
 
-	var caCertPool *x509.CertPool
-	if caName := cfg.Spec.ObjectStorage.CACertSecretName; caName != "" && !cfg.Spec.ObjectStorage.InsecureSkipVerify {
-		caSecret, err := r.getSecret(ctx, cfg.Namespace, caName, []string{caCertKey})
-		if err != nil {
-			r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
-				"StorageCACertInvalid", err.Error())
-			return
-		}
-		caCertPool = x509.NewCertPool()
-		if !caCertPool.AppendCertsFromPEM(caSecret.Data[caCertKey]) {
-			r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
-				"StorageCACertInvalid", fmt.Sprintf("secret %q key ca.crt contains no valid PEM certificates", caName))
-			return
-		}
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: cfg.Namespace, Name: secretName}, secret); err != nil {
+		r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
+			"StorageSecretInvalid", fmt.Sprintf("get secret %q: %v", secretName, err))
+		return
 	}
 
 	endpoint := resources.S3Endpoint(cfg)
 	region := s3Region(cfg)
 	accessKey := string(secret.Data[s3SecretKeys[0]])
 	secretKey := string(secret.Data[s3SecretKeys[1]])
-	if err := s3ListBucketsProbe(ctx, endpoint, region, accessKey, secretKey, validationTimeout, cfg.Spec.ObjectStorage.InsecureSkipVerify, caCertPool); err != nil {
+	if err := s3ListBucketsProbe(ctx, endpoint, region, accessKey, secretKey, validationTimeout); err != nil {
 		r.setCondition(cfg, costv1alpha1.ConditionStorageReady, metav1.ConditionFalse,
 			"StorageUnreachable", err.Error())
 		return
@@ -74,7 +62,7 @@ func (r *CostManagementServiceConfigReconciler) validateObjectStorage(ctx contex
 
 // s3ListBucketsProbe calls S3 ListBuckets against endpoint using path-style
 // addressing (required for MinIO / NooBaa / Ceph RGW).
-func s3ListBucketsProbe(ctx context.Context, endpoint, region, accessKey, secretKey string, timeout time.Duration, insecureSkipVerify bool, caCertPool *x509.CertPool) error {
+func s3ListBucketsProbe(ctx context.Context, endpoint, region, accessKey, secretKey string, timeout time.Duration) error {
 	if region == "" {
 		region = defaultS3Region
 	}
@@ -89,23 +77,12 @@ func s3ListBucketsProbe(ctx context.Context, endpoint, region, accessKey, secret
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		base = &http.Transport{}
-	}
-	transport := base.Clone()
-	if transport.TLSClientConfig == nil {
-		transport.TLSClientConfig = &tls.Config{}
-	}
-	transport.TLSClientConfig.InsecureSkipVerify = insecureSkipVerify //nolint:gosec // user-controlled via CR spec
-	transport.TLSClientConfig.RootCAs = caCertPool
-	httpClient := &http.Client{Timeout: timeout, Transport: transport}
 	client := s3.New(s3.Options{
 		Region:       region,
 		Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 		BaseEndpoint: aws.String(endpoint),
 		UsePathStyle: true,
-		HTTPClient:   httpClient,
+		HTTPClient:   &http.Client{Timeout: timeout},
 		EndpointOptions: s3.EndpointResolverOptions{
 			DisableHTTPS: u.Scheme == "http",
 		},

@@ -239,13 +239,7 @@ kubectl -n "$NAMESPACE" describe cmsc "$CR_NAME"
 ```
 
 Useful conditions: `DatabaseReady`, `CacheReady`, `KafkaReady`,
-`SchemaUpToDate`, `RBACReady` (API — this is what `Available` waits on),
-`RBACWorkerReady` (Celery worker; does **not** gate `Available`),
-`AuthenticationReady` (OIDC), `GatewayReady`, `IngressReady`,
-`UIReady`, `Available`.
-
-`Available=True` means the RBAC **API** and Koku API are up. A down RBAC
-worker shows up as `RBACWorkerReady=False` and does not flip `Available`.
+`SchemaUpToDate`, `AuthenticationReady` (gateway), `UIReady`, `Available`.
 
 Phase is human-readable only — prefer conditions.
 

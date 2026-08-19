@@ -69,9 +69,6 @@ func TestCACombineConfigMap(t *testing.T) {
 	if !strings.Contains(script, "/ca-output/ca-bundle.crt") {
 		t.Errorf("combine script missing output path: %q", script)
 	}
-	if !strings.Contains(script, "/ca-extra") {
-		t.Errorf("combine script missing optional /ca-extra path: %q", script)
-	}
 }
 
 func TestServiceCAConfigMap_InjectAnnotation(t *testing.T) {

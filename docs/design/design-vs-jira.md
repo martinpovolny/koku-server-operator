@@ -39,8 +39,7 @@ uses **three top-level conditions** as the primary machine-readable API:
 
 Below these, **component-specific conditions** carry the detail:
 `DatabaseReady`, `CacheReady`, `KafkaReady`, `StorageReady`,
-`AuthenticationReady`, `SchemaUpToDate`, `DiscoveryComplete`, `RBACReady`,
-`RBACWorkerReady`.
+`AuthenticationReady`, `SchemaUpToDate`, `DiscoveryComplete`.
 
 We keep a `Phase` field — **Pending / Progressing / Ready / Degraded** —
 as a human-readable convenience for `kubectl get cmsc`, not as the primary

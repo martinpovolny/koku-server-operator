@@ -121,7 +121,7 @@ func TestJWKSProbe(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// getSecret
+// checkSecretKeys
 // -----------------------------------------------------------------------------
 
 func TestCheckSecretKeys(t *testing.T) {
@@ -151,18 +151,9 @@ func TestCheckSecretKeys(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := r.getSecret(context.Background(), testNamespace, tc.secret, tc.required)
+			err := r.checkSecretKeys(context.Background(), testNamespace, tc.secret, tc.required)
 			if (err != nil) != tc.wantErr {
-				t.Errorf("getSecret(%q): err=%v, wantErr=%v", tc.secret, err, tc.wantErr)
-			}
-			if !tc.wantErr && got == nil {
-				t.Error("getSecret should return the Secret on success")
-			}
-			if !tc.wantErr && got != nil && got.Name != tc.secret {
-				t.Errorf("returned Secret.Name = %q, want %q", got.Name, tc.secret)
-			}
-			if tc.wantErr && got != nil {
-				t.Error("getSecret should return nil Secret on error")
+				t.Errorf("checkSecretKeys(%q): err=%v, wantErr=%v", tc.secret, err, tc.wantErr)
 			}
 		})
 	}
@@ -434,7 +425,7 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 }
 
 // TestDBSecretValidationRequiresKruizeCredentials verifies that the database
-// Secret validation (getSecret) includes kruize-user and kruize-password.
+// Secret validation (checkSecretKeys) includes kruize-user and kruize-password.
 // Kruize connects to the same PostgreSQL instance; missing its credentials
 // causes Kruize pods to fail silently after migrations complete.
 func TestDBSecretValidationRequiresKruizeCredentials(t *testing.T) {
@@ -464,9 +455,9 @@ func TestDBSecretValidationRequiresKruizeCredentials(t *testing.T) {
 		"rbac-user", "rbac-password",
 		"kruize-user", "kruize-password",
 	}
-	_, err := r.getSecret(context.Background(), testNamespace, testDBSecret, requiredKeys)
+	err := r.checkSecretKeys(context.Background(), testNamespace, testDBSecret, requiredKeys)
 	if err == nil {
-		t.Error("getSecret should fail when kruize-user/kruize-password are absent, got nil")
+		t.Error("checkSecretKeys should fail when kruize-user/kruize-password are absent, got nil")
 	}
 }
 

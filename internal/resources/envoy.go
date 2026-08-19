@@ -164,14 +164,6 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 	}
 
 	falseVal := false
-	init := CACombineInitContainer(cfg)
-	if cfg.Spec.Auth.Keycloak.TLS.CACertSecretName != "" {
-		init.VolumeMounts = append(init.VolumeMounts, corev1.VolumeMount{
-			Name:      "keycloak-ca",
-			MountPath: "/ca-extra",
-			ReadOnly:  true,
-		})
-	}
 	return &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -198,7 +190,7 @@ func EnvoyDeployment(cfg *costv1alpha1.CostManagementServiceConfig) *appsv1.Depl
 					SecurityContext:              nonRootPodSC(),
 					ImagePullSecrets:             imagePullSecrets(cfg),
 					InitContainers: []corev1.Container{
-						init,
+						CACombineInitContainer(cfg),
 					},
 					Containers: []corev1.Container{{
 						Name:            "envoy",
@@ -341,22 +333,7 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	ns := cfg.Namespace
 	tlsBlock := ""
 	if useTLS {
-		skipVerify := cfg.Spec.Auth.Keycloak.TLS.InsecureSkipVerify &&
-			cfg.Spec.Auth.Keycloak.TLS.CACertSecretName == ""
-		if skipVerify {
-			tlsBlock = fmt.Sprintf(`
-    transport_socket:
-      name: envoy.transport_sockets.tls
-      typed_config:
-        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-        sni: %s
-        common_tls_context:
-          tls_params:
-            tls_minimum_protocol_version: TLSv1_2
-          validation_context:
-            trust_chain_verification: ACCEPT_UNTRUSTED`, kcHost)
-		} else {
-			tlsBlock = fmt.Sprintf(`
+		tlsBlock = fmt.Sprintf(`
     transport_socket:
       name: envoy.transport_sockets.tls
       typed_config:
@@ -372,7 +349,6 @@ func EnvoyYAML(cfg *costv1alpha1.CostManagementServiceConfig) string {
               - san_type: DNS
                 matcher:
                   exact: %s`, kcHost, kcHost)
-		}
 	}
 
 	rosRoute := ""
