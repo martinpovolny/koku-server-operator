@@ -368,7 +368,9 @@ type IngressConfig struct {
 	// +kubebuilder:default:="hccm"
 	ValidTypes string `json:"validTypes,omitempty"`
 	// Staging bucket name for uploads.
-	// +kubebuilder:default:="insights-upload-perma"
+	// When empty, the operator uses the same bucket as Koku REQUESTED_BUCKET
+	// (status.discoveredConfig.s3.bucket, else spec.costManagement.storage.bucketName),
+	// then "koku-bucket".
 	StagingBucket string                      `json:"stagingBucket,omitempty"`
 	Resources     corev1.ResourceRequirements `json:"resources,omitempty"`
 }
@@ -679,7 +681,7 @@ type DiscoveredConfig struct {
 	S3 *DiscoveredS3 `json:"s3,omitempty"`
 }
 
-// DiscoveredS3 holds the resolved S3 endpoint and credentials reference.
+// DiscoveredS3 holds the resolved S3 endpoint, object-store bucket name, and credentials reference.
 type DiscoveredS3 struct {
 	// Endpoint in the form scheme://host:port.
 	Endpoint string `json:"endpoint,omitempty"`
@@ -687,6 +689,8 @@ type DiscoveredS3 struct {
 	SecretName string `json:"secretName,omitempty"`
 	// Region used for S3 signature generation.
 	Region string `json:"region,omitempty"`
+	// Bucket is the object-store bucket name (not a Secret).
+	Bucket string `json:"bucket,omitempty"`
 }
 
 type CostManagementServiceConfigStatus struct {

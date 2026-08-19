@@ -1623,8 +1623,11 @@ spec:
                         type: object
                     type: object
                   stagingBucket:
-                    default: insights-upload-perma
-                    description: Staging bucket name for uploads.
+                    description: |-
+                      Staging bucket name for uploads.
+                      When empty, the operator uses the same bucket as Koku REQUESTED_BUCKET
+                      (status.discoveredConfig.s3.bucket, else spec.costManagement.storage.bucketName),
+                      then "koku-bucket".
                     type: string
                   validTypes:
                     default: hccm
@@ -2795,6 +2798,10 @@ spec:
                   s3:
                     description: S3 holds resolved object storage connection details.
                     properties:
+                      bucket:
+                        description: Bucket is the object-store bucket name (not a
+                          Secret).
+                        type: string
                       endpoint:
                         description: Endpoint in the form scheme://host:port.
                         type: string

@@ -1,6 +1,6 @@
 # BYOI (Bring Your Own Infrastructure) sample CR
 # All dependencies (DB, Cache, Kafka, S3, OIDC) are pre-existing external services.
-# The operator connects to them via connection details and credentialsSecretRef fields.
+# The operator connects to them via connection details and secretName fields.
 #
 # For a ready-to-apply local fixture (PG + Valkey + Kafka + MinIO in another
 # namespace), see config/samples/byoi/README.md.
@@ -8,6 +8,8 @@
 # Pre-create these Secrets before applying this CR:
 #
 #   kubectl create secret generic my-db-credentials \
+#     --from-literal=postgres-user=postgres \
+#     --from-literal=postgres-password=<password> \
 #     --from-literal=koku-user=koku \
 #     --from-literal=koku-password=<password> \
 #     --from-literal=ros-user=ros_user \
@@ -137,12 +139,6 @@ spec:
       replicas: 1
     worker:
       replicas: 1
-
-  kruize:
-    replicas: 1
-    image:
-      repository: quay.io/redhat-services-prod/kruize-autotune-tenant/autotune
-      tag: "d1f0140"
 
   ui:
     replicaCount: 1

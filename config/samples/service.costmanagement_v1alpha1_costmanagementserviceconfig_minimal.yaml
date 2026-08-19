@@ -1,0 +1,110 @@
+# Minimal BYOI sample (COST-7679)
+#
+# Smallest operationally useful CostManagementServiceConfig for production-style
+# (external DB, cache, Kafka, S3, OIDC). Omits optional tuning: no celery worker
+# overrides (CRD defaults apply, including SaaS queues at replicas: 0),
+# monitoring.enabled: false (CRD default is true), no resource overrides,
+# no ROS/Kruize (ros.enabled defaults false).
+#
+# Schema note: spec: {} is OpenAPI-valid today but cannot reconcile — images,
+# connection endpoints, and referenced Secrets are required in practice.
+#
+# Pre-create Secrets in the CR namespace before applying:
+#
+#   kubectl create secret generic my-db-credentials \
+#     --from-literal=postgres-user=postgres \
+#     --from-literal=postgres-password=<password> \
+#     --from-literal=koku-user=koku \
+#     --from-literal=koku-password=<password> \
+#     --from-literal=ros-user=ros_user \
+#     --from-literal=ros-password=<password> \
+#     --from-literal=rbac-user=rbac_user \
+#     --from-literal=rbac-password=<password> \
+#     --from-literal=kruize-user=kruize_user \
+#     --from-literal=kruize-password=<password>
+#   (ros-* and kruize-* keys match the CRD credential list; unused while ros.enabled is false.)
+#
+#   kubectl create secret generic my-cache-credentials \
+#     --from-literal=password=<password>
+#
+#   kubectl create secret generic my-s3-credentials \
+#     --from-literal=access-key=<key> \
+#     --from-literal=secret-key=<secret>
+#
+# Replace hostnames, clusterDomain, and image tags for your environment.
+# For a local fixture, see config/samples/byoi/README.md.
+apiVersion: service.costmanagement.openshift.io/v1alpha1
+kind: CostManagementServiceConfig
+metadata:
+  name: cost-management-minimal
+  namespace: cost-onprem
+spec:
+  global:
+    clusterDomain: "apps.cluster.example.com"
+
+  database:
+    deploy: false
+    host: "postgresql.databases.svc.cluster.local"
+    port: 5432
+    sslMode: "require"
+    secretName: "my-db-credentials"
+
+  cache:
+    deploy: false
+    host: "redis.cache.svc.cluster.local"
+    port: 6379
+    auth:
+      enabled: true
+      secretName: "my-cache-credentials"
+
+  kafka:
+    bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+  objectStorage:
+    endpoint: "s3.openshift-storage.svc.cluster.local"
+    port: 443
+    useSSL: true
+    secretName: "my-s3-credentials"
+
+  auth:
+    keycloak:
+      url: "https://keycloak.auth.svc.cluster.local"
+      realm: "kubernetes"
+    envoy:
+      image:
+        repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
+        tag: "2.6"
+
+  costManagement:
+    api:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+    masu:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+
+  rbac:
+    image:
+      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      tag: "73870d8"
+
+  ingress:
+    # Pin a release tag for production — master is mutable (dev-only).
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+
+  ui:
+    app:
+      image:
+        repository: quay.io/insights-onprem/koku-ui-onprem
+        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+    oauthProxy:
+      image:
+        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
+        tag: "v7.6.0"
+
+  monitoring:
+    enabled: false

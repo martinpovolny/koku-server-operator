@@ -1,7 +1,7 @@
 # Operator Task Tracker
 
 Tracks implementation status against the COST-7678–7700 Jira backlog.
-Last audited: 2026-08-15.
+Last audited: 2026-08-19.
 
 ## Legend
 - ✅ Done — implements the ticket's acceptance criteria
@@ -37,7 +37,7 @@ Last audited: 2026-08-15.
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | Implement application services | 🔄 | Koku API + Masu + Listener `1/1 Running` on CRC ✅, ROS API + Processor ✅ (optional via `spec.ros.enabled`), Kruize Deployment + Service + ClusterRole/Binding ✅ (gated with ROS), Bundled DB/Cache (dev-only extension) ✅. **Beta: ROS/Kruize not required** — see Beta scope below. Missing: 5-minute readiness timeout with Degraded condition. Profile-based sizing → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). |
+| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | Implement application services | 🔄 | Koku API + Masu + Listener Deployments ✅, ROS API + Processor ✅ (optional via `spec.ros.enabled`), Kruize Deployment + Service + ClusterRole/Binding ✅ (gated with ROS). Django key create-once ✅. **G1 ROS workload opt-out closed.** Missing: 5-minute readiness timeout → `Degraded` + backoff (**G2**); Masu/Listener/(optional ROS/Kruize) not readiness-gated so terminal `Available=True` / `AllComponentsReady` / Event `Ready` can fire while those pods are down (**G3**). Profile-based sizing → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). See [gap analysis](gap_analysis/COST-7686.md). |
 | [COST-7687](https://redhat.atlassian.net/browse/COST-7687) | Implement workers and scheduled jobs | ✅ | Celery Beat + 10 workers ✅, ROS Processor + Recommendation Poller + Housekeeper ✅ (when `spec.ros.enabled`), ROS Partition Cleaner CronJob ✅, Kruize DeletePartitions CronJob ✅. Ticket's six on-prem queues all present. SaaS queues (`hcs`, `subs_*`) default `replicas: 0` ✅ ([#73](https://github.com/project-koku/koku-service-operator/pull/73)). Profile sizing → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). |
 | [COST-7688](https://redhat.atlassian.net/browse/COST-7688) | Implement Gateway and Ingress | ✅ | Envoy JWT proxy Deployment + Service + ConfigMap wired to OIDC issuer/audiences ✅, OpenShift Route for gateway API ✅, insights-ingress-go Deployment + Service ✅. `GatewayReady` (Envoy + Route) is independent of `AuthenticationReady` (OIDC probe) ✅. `IngressReady` gates Workers before Edge ✅. |
 | [COST-7689](https://redhat.atlassian.net/browse/COST-7689) | Implement RBAC Service | ✅ | RBAC API Deployment + Service + RBAC Celery worker Deployment ✅. Deployed in Stage 4 before Koku. Both wired with rbac-user/rbac-password from DB credentials secret + cache env vars. Keycloak-to-RBAC principal sync CronJob + ConfigMap ✅ ([PR #53](https://github.com/project-koku/koku-service-operator/pull/53)). `RBACReady` gates on the RBAC API before `Available`. Profile sizing → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). See [gap analysis](gap_analysis/COST-7689.md). |

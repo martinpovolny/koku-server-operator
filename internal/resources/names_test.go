@@ -40,6 +40,26 @@ func TestKafkaPortMultiBroker(t *testing.T) {
 	}
 }
 
+func TestS3BucketPrefersDiscovered(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Spec.ObjectStorage.SecretName = "user-s3"
+	cfg.Spec.CostManagement.Storage.BucketName = "koku-bucket"
+	cfg.Status.DiscoveredConfig = &costv1alpha1.DiscoveredConfig{
+		S3: &costv1alpha1.DiscoveredS3{Bucket: "from-status"},
+	}
+	if got := S3Bucket(cfg); got != "from-status" {
+		t.Errorf("S3Bucket = %q, want from-status (discovered wins even with secretName set)", got)
+	}
+}
+
+func TestS3BucketFallsBackToSpec(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{}
+	cfg.Spec.CostManagement.Storage.BucketName = "koku-bucket"
+	if got := S3Bucket(cfg); got != "koku-bucket" {
+		t.Errorf("S3Bucket = %q, want koku-bucket", got)
+	}
+}
+
 func TestDNS1123Label(t *testing.T) {
 	tests := []struct {
 		in, want string

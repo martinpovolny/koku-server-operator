@@ -1,12 +1,12 @@
 # Beta Gap Priority Summary
 
-**Audited inputs:** [COST-7678](COST-7678.md)–[COST-7685](COST-7685.md), [COST-7687](COST-7687.md)–[COST-7692](COST-7692.md) (2026-08-10; refreshed for `spec.ros.enabled` / `ROSEnabled`)
-**Also considered:** [docs/tasks.md](../tasks.md) (COST-7686, COST-7693–7700 — no per-ticket gap docs yet)
+**Audited inputs:** [COST-7678](COST-7678.md)–[COST-7692](COST-7692.md) (2026-08-10; COST-7686 refreshed 2026-08-19)
+**Also considered:** [docs/tasks.md](../tasks.md) (COST-7693–7700 — no per-ticket gap docs yet)
 **Beta bar used here:** A beta customer can install the operator, apply a BYOI `CostManagementServiceConfig` with **`ros.enabled: false`**, reach an honest Ready/Available state for the **core Cost** stack (Koku/Masu/Listener, Celery on-prem workers, RBAC, Ingress, Gateway, UI — **not ROS, not Kruize**), and not hit silent false-success or plaintext-secret API footguns. HA polish, full monitoring parity, E2E suites, and day-2 rotation can trail.
 
 **Scope note (2026-08-10):** ROS and Kruize are **out of beta**. Name them separately in gaps (different secrets, migrate, readiness). Optional install, independent Kruize enablement, and day-2 enablement are owned by **[COST-8054](../jira/COST-8054.md)** — not by COST-7678–7692 closure.
 
-**Code progress since first draft:** `spec.ros.enabled` (`*bool`, **default `false`** for Cost-only beta) + `ROSEnabled()` gate Deployments/CronJobs/migrate/Envoy ROS routes/NPs/SMs; `reconcileROSFeature` sets condition `ROSEnabled` and cleans up when flipped off. Samples keep `ros.enabled: false`. **Still open for Cost-only honesty:** Validation **always** requires `ros-user` / `ros-password` (not conditional; not Kruize keys); Kruize is not independently toggleable (tied to ROS today). Opt in with `ros.enabled: true` + images. “Out of beta scope” means *do not treat ROS or Kruize readiness/hardening as Cost beta blockers*.
+**Code progress since first draft:** `spec.ros.enabled` (`*bool`, **default `false`** for Cost-only beta) + `ROSEnabled()` gate Deployments/CronJobs/migrate/Envoy ROS routes/NPs; `reconcileROSFeature` sets condition `ROSEnabled` and cleans up when flipped off. Samples keep `ros.enabled: false`. **ServiceMonitors are not fully gated:** `reconcileMonitoring` still applies `KruizeServiceMonitor` after cleanup (Cost-only installs get a Kruize SM CR; `ros-api` on the App SM is a dead selector, not a live target) — see [COST-7686](COST-7686.md) G1 leftover / [COST-7692](COST-7692.md). **Still open for Cost-only honesty:** Validation **always** requires `ros-user` / `ros-password` (not conditional; not Kruize keys); Kruize is not independently toggleable (tied to ROS today). Opt in with `ros.enabled: true` + images. “Out of beta scope” means *do not treat ROS or Kruize readiness/hardening as Cost beta blockers*.
 
 Per-ticket detail stays in the linked audits. This doc is the cross-cut ranking.
 
@@ -127,7 +127,7 @@ UI already reads `spec.profile` when `spec.ui.*.resources` are unset ([#65](http
 | Ticket | Summary | Suggested beta rank |
 |--------|---------|---------------------|
 | [COST-7695](https://redhat.atlassian.net/browse/COST-7695) | OLM bundle | **P0** if beta is delivered via OLM; else P1 |
-| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | App services — 5m readiness → Degraded | Readiness timeout **P1**; profile sizing → [COST-8095](../jira/COST-8095.md) **P2** |
+| [COST-7686](https://redhat.atlassian.net/browse/COST-7686) | App services — 5m readiness → Degraded; Masu/Listener gates | Readiness timeout **P1** (G2/G3); profile sizing → [COST-8095](../jira/COST-8095.md) **P2** |
 | [COST-7693](https://redhat.atlassian.net/browse/COST-7693) | Upgrade/scaling/rollback | **P2** (basic image-tag migrate exists) |
 | [COST-7694](https://redhat.atlassian.net/browse/COST-7694) | Secret rotation annotation | **P2** (day-2); CA merge overlaps [7691 G3](COST-7691.md) **P1** |
 | [COST-7696](https://redhat.atlassian.net/browse/COST-7696)–[7699](https://redhat.atlassian.net/browse/COST-7699) | Bundle CI / E2E / OpenShift CI | **P2** for beta; **P1** if beta needs automated install proof |
@@ -206,7 +206,8 @@ Track separately; do not conflate the two components. **Partial progress already
 | Behavior | Status |
 |----------|--------|
 | Skip `ROSMigrationJob` when `ros.enabled=false` | Done (`reconcileMigration` + `ROSEnabled()`) |
-| Skip ROS/Kruize Deployments, CronJobs, Envoy ROS routes, Kruize NP/SM | Done (gated apply + `reconcileROSFeature` cleanup) |
+| Skip ROS/Kruize Deployments, CronJobs, Envoy ROS routes, Kruize NP | Done (gated apply + `reconcileROSFeature` cleanup) |
+| Skip Kruize ServiceMonitor when ROS off | **Not done** — `reconcileMonitoring` re-applies `KruizeServiceMonitor` after cleanup ([COST-7686](COST-7686.md) G1 leftover). `ros-api` on the App SM is a dead `In` value, not a live scrape. |
 | `ROSEnabled` condition | Done |
 | BYOI samples + CRD / `ROSEnabled()` default `ros.enabled: false` | Done |
 | Default when unset | **Disabled** (`+kubebuilder:default:=false`, `BoolVal(..., false)`) |
@@ -238,15 +239,16 @@ S3/OBC items stay relevant either way — Ingress/uploads still need object stor
 | [COST-7683](COST-7683.md) | Not fully done | OBC RBAC (P0 if OBC in scope) |
 | [COST-7684](COST-7684.md) | Not fully done | S3 keys + Auth overwrite + OIDC (P0); always-required `ros-*` keys + Kruize keys R3 → [COST-8054](../jira/COST-8054.md) |
 | [COST-7685](COST-7685.md) | Done | Tests only (G1); ROS migrate skip already gated by `ros.enabled` |
+| [COST-7686](COST-7686.md) | Not fully done | Workloads + ROS opt-out **done**; 5m timeout → Degraded (**G2 P1**); Masu/Listener not readiness-gated (**G3**); profile → [COST-8095](../jira/COST-8095.md) **P2** |
 | [COST-7687](COST-7687.md) | Not fully done | SaaS queue exclusion (P0); ROS/Kruize workloads gated when disabled; sizing → [COST-8054](../jira/COST-8054.md) |
 | [COST-7688](COST-7688.md) | Largely done | Auth condition collision (P0) |
 | [COST-7689](COST-7689.md) | Done | Readiness closed; sizing → [COST-8095](../jira/COST-8095.md) |
 | [COST-7690](COST-7690.md) | Not fully done | UI profile sizing done; remaining maps → [COST-8095](../jira/COST-8095.md) **P2**; Related `UIReady` ≠ pods Ready (T1 trust) |
 | [COST-7691](COST-7691.md) | Not done | CA merge + core NPs (P1); ROS/Kruize SA/NP → [COST-8054](../jira/COST-8054.md) |
-| [COST-7692](COST-7692.md) | Not done | Monitoring completeness (P2); Kruize SM only when `ROSEnabled`; ROS/Kruize SM → [COST-8054](../jira/COST-8054.md) |
+| [COST-7692](COST-7692.md) | Not done | Monitoring completeness (P2); Kruize SM is **not** ROS-gated on apply ([COST-7686](COST-7686.md) G1 leftover); ROS/Kruize SM → [COST-8054](../jira/COST-8054.md) |
 | [COST-8054](../jira/COST-8054.md) | In progress (partial) | Conditional Validation keys; independent Kruize; day-2; hardening gaps |
 
-No gap doc yet for **COST-7686** (app services) — treat readiness timeout as P1 and profile sizing as [COST-8095](../jira/COST-8095.md) (T5).
+**COST-7686** gap doc: [COST-7686.md](COST-7686.md). Remaining for that ticket: readiness timeout **P1** (G2) and Masu/Listener gates (G3). Profile sizing → [COST-8095](../jira/COST-8095.md) (T5).
 
 ---
 

@@ -90,6 +90,11 @@ func TestResolveS3_UserProvided(t *testing.T) {
 				SecretName: "byoi-s3-credentials",
 				S3:         costv1alpha1.S3Options{Region: defaultS3Region},
 			},
+			CostManagement: costv1alpha1.CostManagementConfig{
+				Storage: costv1alpha1.CostManagementStorageSpec{
+					BucketName: "koku-bucket",
+				},
+			},
 		},
 	}
 
@@ -105,6 +110,9 @@ func TestResolveS3_UserProvided(t *testing.T) {
 	}
 	if got.Region != defaultS3Region {
 		t.Errorf("Region: got %q", got.Region)
+	}
+	if got.Bucket != "koku-bucket" {
+		t.Errorf("Bucket: got %q, want koku-bucket", got.Bucket)
 	}
 }
 
@@ -134,6 +142,9 @@ func TestResolveS3_OBC(t *testing.T) {
 	wantSecret := testCRName + "-storage-credentials"
 	if got.SecretName != wantSecret {
 		t.Errorf("SecretName: got %q, want %q", got.SecretName, wantSecret)
+	}
+	if got.Bucket != "ros-data" {
+		t.Errorf("Bucket: got %q, want ros-data", got.Bucket)
 	}
 
 	// Credentials should be copied into the app storage secret.
@@ -175,6 +186,9 @@ func TestResolveS3_NooBaa(t *testing.T) {
 	if string(sec.Data["access-key"]) != "ak-nb" {
 		t.Errorf("access-key: got %q", sec.Data["access-key"])
 	}
+	if got.Bucket != "" {
+		t.Errorf("Bucket: got %q, want empty (spec bucketName unset)", got.Bucket)
+	}
 }
 
 // TestResolveS3_NooBaaPrefersAPIReader simulates OwnNamespace cache: the
@@ -206,6 +220,120 @@ func TestResolveS3_NooBaaPrefersAPIReader(t *testing.T) {
 	}
 	if string(sec.Data["access-key"]) != "ak-api" || string(sec.Data["secret-key"]) != "sk-api" {
 		t.Errorf("secret data: access=%q secret=%q", sec.Data["access-key"], sec.Data["secret-key"])
+	}
+}
+
+func TestDiscoverOBC_MissingBucketName(t *testing.T) {
+	obcName := "ros-data-ceph"
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(
+			objectBucketClaim(obcName, testNamespace, "Bound"),
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: obcName, Namespace: testNamespace},
+				Data: map[string]string{
+					"BUCKET_HOST": "rook-ceph-rgw.openshift-storage.svc",
+					"BUCKET_PORT": "443",
+				},
+			},
+			obcSecret(obcName, testNamespace, "ak-obc", "sk-obc"),
+		).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	got, err := r.discoverOBC(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when OBC ConfigMap lacks BUCKET_NAME")
+	}
+	if got != nil {
+		t.Fatalf("expected nil DiscoveredS3 from OBC path, got %+v", got)
+	}
+}
+
+func TestDiscoverOBC_EmptyBucketName(t *testing.T) {
+	obcName := "ros-data-ceph"
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(
+			objectBucketClaim(obcName, testNamespace, "Bound"),
+			obcConfigMap(obcName, testNamespace, "rook-ceph-rgw.openshift-storage.svc", "443", ""),
+			obcSecret(obcName, testNamespace, "ak-obc", "sk-obc"),
+		).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	got, err := r.discoverOBC(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when OBC ConfigMap BUCKET_NAME is empty")
+	}
+	if got != nil {
+		t.Fatalf("expected nil DiscoveredS3 from OBC path, got %+v", got)
+	}
+}
+
+func TestResolveS3_OBCMissingBucketName(t *testing.T) {
+	obcName := "ros-data-ceph"
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(
+			objectBucketClaim(obcName, testNamespace, "Bound"),
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: obcName, Namespace: testNamespace},
+				Data: map[string]string{
+					"BUCKET_HOST": "rook-ceph-rgw.openshift-storage.svc",
+					"BUCKET_PORT": "443",
+				},
+			},
+			obcSecret(obcName, testNamespace, "ak-obc", "sk-obc"),
+		).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+	}
+
+	got, err := r.resolveS3(context.Background(), cfg)
+	if err == nil {
+		if got != nil && got.Bucket == "" {
+			t.Fatalf("OBC path must not succeed with empty Bucket: %+v", got)
+		}
+		t.Fatalf("expected resolveS3 to fail without NooBaa fallback, got %+v", got)
+	}
+}
+
+func TestResolveS3_NooBaaCopiesSpecBucket(t *testing.T) {
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(noobaaAdminSecret("ak-nb", "sk-nb")).
+		Build()
+
+	r := &CostManagementServiceConfigReconciler{Client: c, Recorder: record.NewFakeRecorder(10)}
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName, Namespace: testNamespace},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			CostManagement: costv1alpha1.CostManagementConfig{
+				Storage: costv1alpha1.CostManagementStorageSpec{
+					BucketName: "from-spec",
+				},
+			},
+		},
+	}
+
+	got, err := r.resolveS3(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Bucket != "from-spec" {
+		t.Errorf("Bucket: got %q, want from-spec", got.Bucket)
 	}
 }
 

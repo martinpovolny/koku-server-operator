@@ -1,0 +1,217 @@
+# Production / HA BYOI sample (COST-7679)
+#
+# Demonstrates a full external-infrastructure deployment with:
+#   - spec.profile: ha (raises UI CPU/memory when component resources are unset)
+#   - monitoring.enabled: true
+#   - explicit resource overrides on core workloads
+#   - higher replica counts on gateway and listener
+#
+# Profile sizing maps for Koku, Celery, RBAC, etc. are tracked in COST-8095.
+# Until those land, this sample uses explicit spec.*.resources overrides for
+# production-shaped footprints. spec.profile still affects UI defaults.
+#
+# Beta: ROS/Kruize are out of scope — ros.enabled stays false.
+#
+# Pre-create Secrets in the CR namespace before applying.
+# Start with the minimal sample commands, then add production-only Secrets:
+#
+#   kubectl create secret generic my-cache-tls \
+#     --from-file=ca.crt=<path-to-cache-ca.pem>
+#
+#   kubectl create secret generic my-kafka-sasl-credentials \
+#     --from-literal=username=<user> \
+#     --from-literal=password=<password>
+#
+#   kubectl create secret generic kafka-cluster-ca-cert \
+#     --from-file=ca.crt=<path-to-kafka-ca.pem>
+#
+#   kubectl create secret generic my-s3-ca \
+#     --from-file=ca.crt=<path-to-s3-ca.pem>
+#
+# See service.costmanagement_v1alpha1_costmanagementserviceconfig_minimal.yaml
+# for my-db-credentials, my-cache-credentials, and my-s3-credentials.
+apiVersion: service.costmanagement.openshift.io/v1alpha1
+kind: CostManagementServiceConfig
+metadata:
+  name: cost-management-production
+  namespace: cost-onprem
+spec:
+  profile: ha
+
+  global:
+    clusterDomain: "apps.cluster.example.com"
+
+  database:
+    deploy: false
+    host: "postgresql.databases.svc.cluster.local"
+    port: 5432
+    sslMode: "require"
+    secretName: "my-db-credentials"
+
+  cache:
+    deploy: false
+    host: "redis.cache.svc.cluster.local"
+    port: 6379
+    auth:
+      enabled: true
+      secretName: "my-cache-credentials"
+    tls:
+      enabled: true
+      caCertSecretName: "my-cache-tls"
+
+  kafka:
+    bootstrapServers: "kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    securityProtocol: "SASL_SSL"
+    sasl:
+      mechanism: "SCRAM-SHA-512"
+      existingSecret: "my-kafka-sasl-credentials"
+    tls:
+      enabled: true
+      caCertSecret: "kafka-cluster-ca-cert"
+
+  objectStorage:
+    endpoint: "s3.openshift-storage.svc.cluster.local"
+    port: 443
+    useSSL: true
+    secretName: "my-s3-credentials"
+    s3:
+      region: "us-east-1"
+      addressingStyle: "path"
+    caCertSecretName: "my-s3-ca"
+
+  auth:
+    keycloak:
+      url: "https://keycloak.auth.svc.cluster.local"
+      issuerURL: "https://keycloak-keycloak.apps.cluster.example.com"
+      realm: "kubernetes"
+      audiences:
+        - "cost-management-operator"
+        - "cost-management-ui"
+    envoy:
+      image:
+        repository: registry.redhat.io/openshift-service-mesh/proxyv2-rhel9
+        tag: "2.6"
+      replicas: 2
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+  costManagement:
+    storage:
+      bucketName: "koku-bucket"
+      rosBucketName: "ros-data"
+    api:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+      replicas: 2
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    masu:
+      image:
+        repository: quay.io/redhat-services-prod/cost-mgmt-dev-tenant/koku
+        tag: "d8055ac"
+      replicas: 2
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+    listener:
+      replicas: 2
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    celery:
+      # Worker CPU/memory defaults → COST-8095; replica counts shown here only.
+      workers:
+        default:
+          replicas: 2
+        priority:
+          replicas: 2
+        summary:
+          replicas: 2
+        ocp:
+          replicas: 2
+
+  ros:
+    enabled: false
+
+  rbac:
+    image:
+      repository: quay.io/redhat-services-prod/hcc-accessmanagement-tenant/insights-rbac
+      tag: "73870d8"
+    api:
+      replicas: 2
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+    worker:
+      replicas: 2
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+
+  ingress:
+    # Pin a release tag for production — master is mutable (dev-only).
+    image:
+      repository: quay.io/iop/ingress
+      tag: "master"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  ui:
+    replicaCount: 2
+    app:
+      image:
+        repository: quay.io/insights-onprem/koku-ui-onprem
+        tag: "2f23c646581028bd385856b6713e6bf367baf953"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    oauthProxy:
+      image:
+        repository: registry.redhat.io/rhceph/oauth2-proxy-rhel9
+        tag: "v7.6.0"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+  monitoring:
+    enabled: true

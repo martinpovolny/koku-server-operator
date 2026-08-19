@@ -1,0 +1,326 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Repo overlay on the project-koku/coderabbit central config.
+# Requires inheritance so org defaults (profile, tone, drafts, learnings)
+# merge instead of being replaced. After the first PR lands, run
+# `@coderabbitai configuration` to confirm each key's source layer.
+inheritance: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      # CLAUDE.md is auto-detected; the mappings below attach design docs to
+      # the code they govern (string entries only scope to their own directory).
+      - files: docs/design/security-context-strategy.md
+        applyTo: "internal/resources/**/*.go"
+      - files: docs/design/koku-django-log-handler-problem.md
+        applyTo: "internal/resources/{pod,volumes,koku,database,rbac}*.go"
+      - files: docs/development/ownnamespace.md
+        applyTo: "{cmd,config/rbac,internal/controller}/**"
+      - files: config/rbac/CLAUDE.md
+        applyTo: "{config/rbac,internal/controller}/**"
+  web_search:
+    enabled: true
+  automatic_repository_linking: false
+  linked_repositories:
+    - repository: project-koku/koku
+      instructions: >-
+        Application this operator deploys (API, Masu, Celery, env vars,
+        Django settings). Flag operator env/volume/probe changes that would
+        disagree with koku's on-prem configuration.
+
+reviews:
+  high_level_summary_instructions: >-
+    Summarize operator impact: CRD API compatibility, reconcile-phase
+    behavior, RBAC, and user-visible status conditions. Mention COST-xxxx
+    tickets when the PR references them. Skip generated-file churn.
+  path_filters:
+    # controller-gen / OLM output — CI `check-generated` owns drift.
+    - "!**/zz_generated.*.go"
+    - "!config/crd/bases/**"
+    - "!config/rbac/role.yaml"
+    - "!config/webhook/manifests.yaml"
+    - "!bundle/**"
+    - "!go.sum"
+    # Ticket dumps and synthetic report fixtures are not reviewable code.
+    - "!docs/jira/**"
+    - "!docs/gap_analysis/**"
+    - "!test/pytest/data/**"
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Kubernetes operator (controller-runtime) for CostManagementServiceConfig
+        (CMSC). Production is BYOI: PostgreSQL, Kafka, and object storage are
+        customer-provided. database.deploy and cache.deploy are dev/CI only;
+        do not design or review as if bundled infra were the production path.
+        Kafka is never bundled.
+
+        Focus on correctness, idempotency, security, and API compatibility.
+        Do not nitpick style, naming, or golangci-lint issues CI already enforces.
+        Prefer conditions (Available, Progressing, Degraded, plus component
+        conditions) as the machine-readable status API; Phase is display-only.
+
+    - path: "api/v1alpha1/**/*.go"
+      instructions: |
+        CRD API is the user contract. Flag field removal, rename, or type
+        change as breaking. New optional fields must be pointers with
+        +optional, godoc, and kubebuilder markers.
+
+        Opt-out / default-true booleans MUST be *bool. Plain
+        bool+omitempty+default:true drops false on round-trip.
+
+        Never accept passwords, tokens, or raw credentials on the spec;
+        use Secret references (secretName, credentialsSecretRef, SecretKeyRef).
+        Prefer CEL (XValidation) for spec invariants; keep the webhook for
+        checks CEL cannot express (e.g. resource request vs limit).
+
+        Condition type constants live in this package. New component
+        conditions belong in status.conditions alongside the top-level
+        Available/Progressing/Degraded set.
+
+        Ignore zz_generated.deepcopy.go (filtered). After type or marker
+        changes, the PR should include `make generate manifests` output.
+
+    - path: "internal/controller/**/*.go"
+      instructions: |
+        Phase-gated reconciler. Authoritative stage order is the runPhases
+        call in reconcile(). Review new work against that pipeline.
+
+        Namespace-scoped objects go through apply() (SSA, ForceOwnership,
+        field owner koku-service-operator). Secrets that hold generated
+        credentials go through ensureSecret() (create-only, never overwrite).
+        Cluster-scoped objects go through applyClusterScoped() AND must be
+        listed in the clusterScoped slice in reconcileDelete() — ownerRefs
+        cannot garbage-collect them. Do not introduce client.Create/Update
+        for objects apply() already owns.
+
+        Cross-namespace reads (e.g. NooBaa admin Secret) must use APIReader,
+        not the namespaced informer cache (OwnNamespace).
+
+        Status: patch via the status subresource; do not flip condition
+        reasons in a later phase that overwrite an earlier failure.
+        Readiness gates must use ObservedGeneration / UpdatedReplicas, not
+        only AvailableReplicas.
+
+        New +kubebuilder:rbac markers must stay namespace-scoped. Cluster
+        resources (consolelinks, clusterroles, clusterrolebindings,
+        ingresses, storageclasses, noobaa-admin) belong in
+        config/rbac/cluster_access_role.yaml, not in markers that generate
+        role.yaml.
+
+    - path: "internal/resources/**/*.go"
+      instructions: |
+        Resource builders produce desired Pod/Workload specs. SSA will
+        revert any field they set, so builders must be complete and stable.
+
+        Security context (restricted-v2, no anyuid):
+        - Pod: runAsNonRoot, seccomp RuntimeDefault, no runAsUser.
+        - Container: allowPrivilegeEscalation false, capabilities drop ALL.
+        - Do not hardcode UIDs; OpenShift SCC injects the namespace range.
+        - readOnlyRootFilesystem is required except where documented:
+          koku app containers (Django FileHandler — see
+          koku-django-log-handler-problem.md) and bundled postgres.
+        Do not flag the koku/postgres RORFS exception as a new defect.
+        Do flag a new hardcoded runAsUser or a new koku-family container
+        that silently copies the exception without the same constraint.
+
+        Env values derived from the CR must not embed Secret data; use
+        secretKeyRef. Image refs are repository:tag from spec. Names come
+        from names.go — do not invent parallel naming.
+
+        Duplicate TypeMeta strings and chart-like env blocks are expected
+        here; do not flag them as copy-paste unless behavior diverges.
+
+    - path: "api/v1alpha1/*webhook*.go"
+      instructions: |
+        Validating webhook must reject invalid spec with field.ErrorList
+        paths users can act on. Mutating webhook must stay side-effect free
+        (failurePolicy=fail, sideEffects=None). Changes here need matching
+        updates under config/webhook/ (except generated manifests.yaml).
+
+    - path: "cmd/**/*.go"
+      instructions: |
+        OwnNamespace: watch namespace is the install namespace (SA file
+        in-cluster, NAMESPACE env out-of-cluster). Do not widen the
+        informer cache to all namespaces. --dev must never be the default
+        for in-cluster. wait-for is shipped in the operator image for
+        init containers; keep it a static binary with no extra runtime.
+
+    - path: "config/rbac/**"
+      instructions: |
+        OwnNamespace split: role.yaml is generated and must contain only
+        namespaced resources. cluster_access_role.yaml is hand-maintained
+        cluster-scoped grants only. Flag cluster-scoped rules added to
+        generated role.yaml, and namespaced CRUD added to
+        cluster_access_role.yaml. New cluster-scoped kinds need a
+        ClusterRoleBinding plus finalizer cleanup in the controller.
+
+    - path: "config/manifests/**"
+      instructions: |
+        CSV is the OLM contract. Flag permission drift vs
+        config/rbac, missing owned CRDs, and installModes changes.
+        CSV still scaffolds AllNamespaces; OwnNamespace (COST-7695) is
+        documented separately — do not re-raise that as a new finding
+        unless this PR claims to implement it.
+
+    - path: "config/samples/**"
+      instructions: |
+        User-facing examples must match current CRD fields and Secret key
+        names. BYOI fixtures under config/samples/byoi/ are local-dev only:
+        placeholder passwords such as byoi-* are expected. Flag real cloud
+        keys, production hostnames, or spec fields that no longer exist.
+
+    - path: "config/manager/**"
+      instructions: |
+        Operator Deployment: non-root, dropped capabilities, health/metrics
+        ports consistent with cmd/main.go. Do not add privileged SCCs.
+
+    - path: "**/*_test.go"
+      instructions: |
+        New exported builders/constructors need tests when the package
+        already has a _test.go (coverage gate is 85% on ./internal/...).
+        YAML assertions (Envoy, manifests) must yaml.Unmarshal into the
+        real type, not strings.Contains; unmarshal err == nil is not enough.
+        Prefer table-driven cases. Do not flag repeated fixtures or
+        testdata literals as duplication.
+
+    - path: "internal/controller/**/*_test.go"
+      instructions: |
+        Integration tests: Ginkgo/Gomega + envtest (suite_test.go).
+        Unit tests: testing.T + client/fake, no KUBEBUILDER_ASSETS.
+        Do not convert existing unit tests to Ginkgo without cause.
+
+    - path: "internal/resources/**/*_test.go"
+      instructions: |
+        Use testing.T (not Ginkgo). Reuse helpers in test_helpers_test.go.
+        Assert security context, env secretKeyRef, and naming via names.go.
+
+    - path: "test/e2e/**/*.go"
+      instructions: |
+        Kind e2e: Ginkgo/Gomega, self-contained, clean up CRs/namespaces.
+        Do not skip isolation or leave cluster-scoped objects behind.
+
+    - path: "test/pytest/**"
+      instructions: |
+        Functional tests against a live stack. Flag flaky waits, hardcoded
+        prod credentials, and cases that skip cleanup. Prefer existing
+        helpers (e2e_helpers, jwt_forge) over new ad-hoc clients.
+
+    - path: "{hack,scripts}/**"
+      instructions: |
+        Shell must be `set -euo pipefail` where bash. Flag unquoted
+        expansions, kubectl against implicit current-context in destructive
+        paths, and secrets printed to stdout.
+
+    - path: "Dockerfile"
+      instructions: |
+        Multi-stage UBI builder, distroless static nonroot runtime, both
+        manager and wait-for binaries. Flag root runtime, extra packages
+        in the final image, or dropping USER 65532:65532.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Pin actions by major version currently used in-repo. Flag secret
+        exfiltration, pull_request_target with untrusted checkout, and
+        workflow permissions broader than contents: read unless required.
+        golangci-lint, govulncheck, make test, check-generated, and Kind
+        e2e already run in CI — do not duplicate those as review nits.
+
+    - path: "docs/design/**/*.md"
+      instructions: |
+        Design docs must match current code. Flag advice that contradicts
+        CLAUDE.md (conditions-over-phase, BYOI production, *bool opt-out,
+        no secrets in spec, finalizers for cluster-scoped objects).
+
+  tools:
+    golangci-lint:
+      enabled: true
+      config_file: .golangci.yml
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    hadolint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    checkov:
+      enabled: true
+    ruff:
+      enabled: true
+    # Style/grammar scanners fight the parent "no CI-covered nits" tone, and
+    # k8s/kustomize YAML fails generic yamllint constantly.
+    languagetool:
+      enabled: false
+    markdownlint:
+      enabled: false
+    yamllint:
+      enabled: false
+    flake8:
+      enabled: false
+    pylint:
+      enabled: false
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: true
+  pre_merge_checks:
+    docstrings:
+      mode: off
+    title:
+      mode: warning
+      requirements: >-
+        Conventional commit prefix (feat, fix, test, docs, ci, chore,
+        refactor) and, when the change maps to a ticket, COST-xxxx.
+        Example: 'feat: gate Available on RBAC API readiness (COST-7689)'.
+    description:
+      mode: warning
+    custom_checks:
+      - name: CRD backward compatibility
+        mode: warning
+        instructions: >-
+          Fail if api/v1alpha1 types remove, rename, or change the JSON
+          type of an existing spec/status field without an explicit
+          deprecation in the PR. Adding fields is a pass. Fail if a
+          default-true / opt-out boolean is added as a non-pointer bool.
+          Pass when there are no API type changes.
+      - name: Cluster-scoped finalizer coverage
+        mode: warning
+        instructions: >-
+          Fail if the PR applies a new cluster-scoped object
+          (ClusterRole, ClusterRoleBinding, ConsoleLink, or any object
+          with empty namespace via applyClusterScoped) that is not added
+          to the clusterScoped slice in reconcileDelete(). Pass if no new
+          cluster-scoped resource is introduced.
+      - name: OwnNamespace RBAC split
+        mode: warning
+        instructions: >-
+          Fail if +kubebuilder:rbac markers grant cluster-scoped
+          resources (consolelinks, clusterroles, clusterrolebindings,
+          ingresses, storageclasses, or cluster-wide secrets). Those
+          belong in config/rbac/cluster_access_role.yaml. Pass if markers
+          stay namespaced and cluster grants stay in cluster_access_role.yaml.
+
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "internal/resources/**/*.go"
+        instructions: >-
+          Generate testing.T tests (not Ginkgo). Table-driven where there
+          are multiple cases. Reuse test_helpers_test.go. Cover security
+          context, env secretKeyRef, and names.go naming.
+      - path: "internal/controller/**/*.go"
+        instructions: >-
+          Prefer testing.T + fake client for unit tests. Use Ginkgo only
+          when the case needs envtest. Do not require KUBEBUILDER_ASSETS
+          in unit tests.
+      - path: "api/v1alpha1/**/*.go"
+        instructions: >-
+          Test CEL/webhook validation with table-driven invalid and valid
+          specs. Cover *bool defaulting via BoolVal.

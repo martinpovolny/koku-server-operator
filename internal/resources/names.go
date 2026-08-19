@@ -187,6 +187,18 @@ func S3Endpoint(cfg *costv1alpha1.CostManagementServiceConfig) string {
 	return scheme + "://" + host + ":" + int32String(port)
 }
 
+// S3Bucket returns the object-store bucket name for Koku REQUESTED_BUCKET.
+// A non-empty status.discoveredConfig.s3.bucket is preferred over
+// spec.costManagement.storage.bucketName, including when the user supplied a Secret.
+func S3Bucket(cfg *costv1alpha1.CostManagementServiceConfig) string {
+	if cfg.Status.DiscoveredConfig != nil &&
+		cfg.Status.DiscoveredConfig.S3 != nil &&
+		cfg.Status.DiscoveredConfig.S3.Bucket != "" {
+		return cfg.Status.DiscoveredConfig.S3.Bucket
+	}
+	return cfg.Spec.CostManagement.Storage.BucketName
+}
+
 func int32String(n int32) string {
 	return strconv.Itoa(int(n))
 }

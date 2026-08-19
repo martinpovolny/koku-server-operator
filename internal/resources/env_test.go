@@ -9,6 +9,50 @@ import (
 	costv1alpha1 "github.com/project-koku/koku-service-operator/api/v1alpha1"
 )
 
+func envValue(env []corev1.EnvVar, name string) (string, bool) {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+func TestKokuCommonEnvRequestedBucketPrefersDiscovered(t *testing.T) {
+	cfg := &costv1alpha1.CostManagementServiceConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},
+		Spec: costv1alpha1.CostManagementServiceConfigSpec{
+			CostManagement: costv1alpha1.CostManagementConfig{
+				Storage: costv1alpha1.CostManagementStorageSpec{
+					BucketName:    "koku-bucket",
+					ROSBucketName: "ros-data",
+				},
+			},
+		},
+		Status: costv1alpha1.CostManagementServiceConfigStatus{
+			DiscoveredConfig: &costv1alpha1.DiscoveredConfig{
+				S3: &costv1alpha1.DiscoveredS3{Bucket: "obc-provisioned-bucket"},
+			},
+		},
+	}
+
+	env := KokuCommonEnv(cfg)
+	got, ok := envValue(env, "REQUESTED_BUCKET")
+	if !ok {
+		t.Fatal("missing REQUESTED_BUCKET")
+	}
+	if got != "obc-provisioned-bucket" {
+		t.Errorf("REQUESTED_BUCKET = %q, want discovered obc-provisioned-bucket", got)
+	}
+	ros, ok := envValue(env, "REQUESTED_ROS_BUCKET")
+	if !ok {
+		t.Fatal("missing REQUESTED_ROS_BUCKET")
+	}
+	if ros != "ros-data" {
+		t.Errorf("REQUESTED_ROS_BUCKET = %q, want spec ros-data (unchanged)", ros)
+	}
+}
+
 func TestKokuCommonEnvS3CredentialNames(t *testing.T) {
 	cfg := &costv1alpha1.CostManagementServiceConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cost-management", Namespace: "cost-onprem"},

@@ -68,6 +68,7 @@ func userProvidedS3(cfg *costv1alpha1.CostManagementServiceConfig) *costv1alpha1
 		Endpoint:   resources.S3Endpoint(cfg),
 		SecretName: cfg.Spec.ObjectStorage.SecretName,
 		Region:     s3Region(cfg),
+		Bucket:     cfg.Spec.CostManagement.Storage.BucketName,
 	}
 }
 
@@ -90,11 +91,15 @@ func (r *CostManagementServiceConfigReconciler) discoverOBC(ctx context.Context,
 	}
 	host := cm.Data["BUCKET_HOST"]
 	port := cm.Data["BUCKET_PORT"]
+	bucket := cm.Data["BUCKET_NAME"]
 	if port == "" {
 		port = "443"
 	}
 	if host == "" {
 		return nil, fmt.Errorf("OBC ConfigMap %s missing BUCKET_HOST", obcName)
+	}
+	if bucket == "" {
+		return nil, fmt.Errorf("OBC ConfigMap %s missing BUCKET_NAME", obcName)
 	}
 
 	src := &corev1.Secret{}
@@ -116,6 +121,7 @@ func (r *CostManagementServiceConfigReconciler) discoverOBC(ctx context.Context,
 		Endpoint:   fmt.Sprintf("https://%s:%s", host, port),
 		SecretName: destName,
 		Region:     s3Region(cfg),
+		Bucket:     bucket,
 	}, nil
 }
 
@@ -175,6 +181,7 @@ func (r *CostManagementServiceConfigReconciler) discoverNooBaa(ctx context.Conte
 		Endpoint:   fmt.Sprintf("https://%s:443", noobaaDefaultEndpoint),
 		SecretName: destName,
 		Region:     s3Region(cfg),
+		Bucket:     cfg.Spec.CostManagement.Storage.BucketName,
 	}, nil
 }
 

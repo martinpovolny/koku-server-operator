@@ -114,6 +114,10 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: test-hack
+test-hack: ## Run no-cluster hack/ script tests (demo-preprod helpers).
+	./hack/demo-preprod_test.sh
+
 # Statement coverage across internal/controller + internal/resources (coverpkg),
 # not make test's per-package cover.out. Override: make coverage-gate COVERAGE_MIN=84.0
 COVERAGE_PKG ?= ./internal/...
