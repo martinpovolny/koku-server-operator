@@ -76,6 +76,14 @@ func TestApplyStatefulSet_UpdatePreservesVolumeClaimTemplates(t *testing.T) {
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "StorageConfigChanged" {
 		t.Fatalf("expected DatabaseReady=False StorageConfigChanged, got %+v", cond)
 	}
+	avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != "StorageConfigChanged" {
+		t.Fatalf("expected Available=False StorageConfigChanged, got %+v", avail)
+	}
+	deg := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+	if deg == nil || deg.Status != metav1.ConditionTrue || deg.Reason != "StorageConfigChanged" {
+		t.Fatalf("expected Degraded=True StorageConfigChanged, got %+v", deg)
+	}
 
 	// Verify no changes were applied.
 	got := &appsv1.StatefulSet{}
@@ -662,6 +670,56 @@ func TestReconcileInfrastructure_VCTMismatchOnReadyDB(t *testing.T) {
 	cond := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDatabaseReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "StorageConfigChanged" {
 		t.Fatalf("expected DatabaseReady=False StorageConfigChanged, got %+v", cond)
+	}
+	avail := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionAvailable)
+	if avail == nil || avail.Status != metav1.ConditionFalse || avail.Reason != "StorageConfigChanged" {
+		t.Fatalf("expected Available=False StorageConfigChanged, got %+v", avail)
+	}
+	deg := findCondition(cfg.Status.Conditions, costv1alpha1.ConditionDegraded)
+	if deg == nil || deg.Status != metav1.ConditionTrue || deg.Reason != "StorageConfigChanged" {
+		t.Fatalf("expected Degraded=True StorageConfigChanged, got %+v", deg)
+	}
+}
+
+func TestApplyStatefulSet_SSACopiesLiveVCTBeforeApply(t *testing.T) {
+	scheme := ownershipScheme(t)
+	cfg := minimalCR(testCRName, testNamespace)
+
+	fs := corev1.PersistentVolumeFilesystem
+	existing := resources.DatabaseStatefulSet(cfg)
+	existing.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse("10Gi")
+	existing.Spec.VolumeClaimTemplates[0].Spec.VolumeMode = &fs
+	replicas := int32(1)
+	existing.Spec.Replicas = &replicas
+
+	r := &CostManagementServiceConfigReconciler{
+		Client:   fakeClientWithApplySupport(scheme, existing),
+		Scheme:   scheme,
+		Recorder: &noopRecorder{},
+	}
+
+	desired := resources.DatabaseStatefulSet(cfg)
+	desired.Spec.Template.Spec.Containers[0].Image = "postgres:new"
+	desired.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage] = resource.MustParse("10Gi")
+	desired.Spec.VolumeClaimTemplates[0].Spec.VolumeMode = nil
+
+	if err := r.applyStatefulSet(context.Background(), cfg, desired); err != nil {
+		t.Fatalf("applyStatefulSet: %v", err)
+	}
+
+	got := &appsv1.StatefulSet{}
+	if err := r.Get(context.Background(), types.NamespacedName{
+		Namespace: testNamespace,
+		Name:      resources.NameDatabase(cfg),
+	}, got); err != nil {
+		t.Fatalf("Get StatefulSet: %v", err)
+	}
+	if got.Spec.Template.Spec.Containers[0].Image != "postgres:new" {
+		t.Errorf("image not updated: got %q", got.Spec.Template.Spec.Containers[0].Image)
+	}
+	mode := got.Spec.VolumeClaimTemplates[0].Spec.VolumeMode
+	if mode == nil || *mode != corev1.PersistentVolumeFilesystem {
+		t.Errorf("live VolumeMode should be preserved across SSA: got %+v", mode)
 	}
 }
 

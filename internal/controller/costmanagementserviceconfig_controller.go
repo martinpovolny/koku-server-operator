@@ -892,9 +892,11 @@ func (r *CostManagementServiceConfigReconciler) ensureServiceAccount(
 
 // applyStatefulSet applies a StatefulSet using Server-Side Apply (SSA).
 // VolumeClaimTemplates are immutable; if they differ from the existing
-// StatefulSet, we set a DatabaseReady=False condition with StorageConfigChanged
-// reason and skip the SSA apply, returning ErrStorageConfigChanged to signal
-// the caller to stop reconciliation before overwriting the condition.
+// StatefulSet, we set DatabaseReady/Available=False and Degraded=True with
+// StorageConfigChanged and skip the SSA apply, returning ErrStorageConfigChanged
+// so the caller stops before later phases overwrite those conditions.
+// When VCT matches, the live templates are copied onto desired so SSA never
+// proposes a VCT update (API defaulting / managedFields must not 403).
 func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Context, cfg *costv1alpha1.CostManagementServiceConfig, desired *appsv1.StatefulSet) error {
 	existing := &appsv1.StatefulSet{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: desired.Namespace, Name: desired.Name}, existing)
@@ -907,13 +909,16 @@ func (r *CostManagementServiceConfigReconciler) applyStatefulSet(ctx context.Con
 
 	// Check if VolumeClaimTemplates differ (immutable field).
 	if !volumeClaimTemplatesEqual(existing.Spec.VolumeClaimTemplates, desired.Spec.VolumeClaimTemplates) {
-		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse,
-			"StorageConfigChanged",
-			"PVC size or storageClass change detected in VolumeClaimTemplates; manual intervention required")
+		msg := "immutable VolumeClaimTemplates change detected; manual intervention required"
+		r.setCondition(cfg, costv1alpha1.ConditionDatabaseReady, metav1.ConditionFalse, "StorageConfigChanged", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionAvailable, metav1.ConditionFalse, "StorageConfigChanged", msg)
+		r.setCondition(cfg, costv1alpha1.ConditionDegraded, metav1.ConditionTrue, "StorageConfigChanged", msg)
+		cfg.Status.Phase = costv1alpha1.PhaseDegraded
 		return ErrStorageConfigChanged
 	}
 
-	// Use SSA for all other mutable fields.
+	// Stamp live VCT onto desired so SSA only updates mutable fields.
+	desired.Spec.VolumeClaimTemplates = append([]corev1.PersistentVolumeClaim(nil), existing.Spec.VolumeClaimTemplates...)
 	return r.apply(ctx, cfg, desired)
 }
 
