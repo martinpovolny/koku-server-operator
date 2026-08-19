@@ -14,7 +14,7 @@ Last audited: 2026-08-19.
 
 | Ticket | Summary | Status | Notes |
 |--------|---------|--------|-------|
-| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | 🔄 | `*bool` for 12 defaulted fields ✅, `metav1.Condition` replacing `ComponentStatuses` ✅, `DiscoveredConfig` in status ✅, `Profile` enum (standard only; `ha` removed until sizing maps are implemented) ✅, phase names fixed (Pending/Progressing/Ready/Degraded) ✅, Django key charset ✅. File split skipped intentionally (see design doc §3). Missing: webhooks (`defaults.go`, `validation.go`), **profile-based sizing** (`spec.profile` is accepted but not read by the reconciler — the Helm chart's 4 sizing overlays need operator equivalents; use per-component `resources` fields until then). |
+| [COST-7678](https://redhat.atlassian.net/browse/COST-7678) | Define CostManagement CRD types | ✅ | CRD types ✅, CEL + admission webhooks ([#50](https://github.com/project-koku/koku-service-operator/pull/50)/[#51](https://github.com/project-koku/koku-service-operator/pull/51)/[#52](https://github.com/project-koku/koku-service-operator/pull/52)) ✅, `dataRetentionMonths` wired ([#59](https://github.com/project-koku/koku-service-operator/pull/59)) ✅. **G4 partial:** enum `standard`/`ha` + UI profile defaults ([#65](https://github.com/project-koku/koku-service-operator/pull/65)) ✅; shared sizing maps for remaining workloads → [COST-8095](https://redhat.atlassian.net/browse/COST-8095). See [gap analysis](gap_analysis/COST-7678.md). |
 | [COST-7679](https://redhat.atlassian.net/browse/COST-7679) | Create sample CRs and generate manifests | 🔄 | Bundled CR ✅, BYOI CR ✅, BYOI kustomize fixture ✅, CRD installs on CRC ✅. Missing: HA profile sample, CEL validation verified. |
 
 ## Reconciler Core
@@ -76,7 +76,7 @@ explicitly. Full ROS/Kruize delivery remains tracked under COST-8054 / post-Beta
 ## Intentional Deviations and Known Gaps
 
 See [docs/design/design-vs-jira.md](design/design-vs-jira.md) for the full analysis.
-Short version: bundled infra is dev-only (intentional), profile-based sizing is not yet implemented (COST-7693 gap), `RealmUser.Password` in spec is a security issue to fix pre-GA.
+Short version: bundled infra is dev-only (intentional), profile-based sizing for remaining workloads is [COST-8095](https://redhat.atlassian.net/browse/COST-8095) (post-beta), `RealmUser.Password` in spec is a security issue to fix pre-GA.
 
 ---
 
@@ -92,9 +92,17 @@ Short version: bundled infra is dev-only (intentional), profile-based sizing is 
 
 ---
 
+## Post-beta follow-ups
+
+| Ticket | Summary | Notes |
+|--------|---------|-------|
+| [COST-8095](https://redhat.atlassian.net/browse/COST-8095) | `spec.profile` sizing maps | Shared `standard`/`ha` maps for remaining Cost workloads. UI already wired. ROS/Kruize rows stay with COST-8054. See [jira snapshot](jira/COST-8095.md). |
+| [COST-8103](https://redhat.atlassian.net/browse/COST-8103) | `CoreServicesAvailable` / mid-pipeline `Available` | Sparse success Events (`Ready`); stop treating Koku-API-up as product-available. See [jira snapshot](jira/COST-8103.md). |
+
+---
+
 ## Next Priority
 
 1. **[COST-7695](https://redhat.atlassian.net/browse/COST-7695)** — OLM bundle generation and validation
 2. **[COST-7694](https://redhat.atlassian.net/browse/COST-7694)** — Secret rotation trigger + `SecretRotated` Event
 3. **[COST-7696](https://redhat.atlassian.net/browse/COST-7696)** — CI bundle pipeline (needs COST-7695 first)
-4. **[COST-7678](https://redhat.atlassian.net/browse/COST-7678)** — Admission webhooks (defaults + validation)

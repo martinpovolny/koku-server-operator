@@ -38,6 +38,16 @@ etcd + kube-apiserver binaries needed by the controller integration tests
 (envtest). Without these, `internal/controller` tests fail with
 "no such file or directory: etcd".
 
+### Worktree setup
+
+The `bin/` directory (controller-gen, setup-envtest, kustomize, envtest
+binaries under `bin/k8s/`) is gitignored and not present in worktrees.
+After creating a worktree, symlink `bin/` from the main checkout:
+
+```bash
+ln -s <main-checkout>/bin <worktree>/bin
+```
+
 ## Production design target
 
 **All infrastructure is external (BYOI).** In production, PostgreSQL, Kafka,

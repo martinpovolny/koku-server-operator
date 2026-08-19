@@ -159,3 +159,110 @@ disabling the sync could leave orphaned CronJobs running.
 
 **Suggested fix:** Add a test following the Kruize CronJob disable pattern
 in `ros_cleanup_test.go`.
+
+---
+
+## 9. S3 TLS fields are probe-only — not wired to app pods
+
+**Source:** Code review of PR #71 (validation follow-ups).
+
+**Problem:** `spec.objectStorage.insecureSkipVerify` and
+`spec.objectStorage.caCertSecretName` configure the operator's own
+`ListBuckets` validation probe, but are not wired to application pod
+env vars (`AWS_CA_BUNDLE`) or volume mounts. App pods that need to
+reach the same S3 endpoint with a private CA rely on the combined CA
+bundle from `CACombineInitContainer`, which does not read the
+objectStorage TLS fields.
+
+The Keycloak and Cache TLS equivalents (`auth.keycloak.tls`,
+`cache.tls`) are wired to both the operator probe and the app
+containers. S3 should follow the same pattern.
+
+**Impact:** A user sets `caCertSecretName` expecting it to fix S3
+connectivity for both the operator condition and the running workloads.
+The `StorageReady` condition turns green, but uploads still fail if
+the app pods don't have the CA in their trust store via another path.
+
+**Suggested fix:** Wire `objectStorage.caCertSecretName` into the
+`CACombineInitContainer` inputs (or set `AWS_CA_BUNDLE` env var on
+Koku/Masu containers) so app pods trust the same CA.
+
+---
+
+## 10. OwnNamespace + CR finalizer: namespace delete sticks in Terminating
+
+**Source:** Cluster Bot pre-prod install (`hack/demo-preprod.sh --reset`), 2026-08-15.
+Cluster `chat-bot-jyn4z-xta9nw`; namespace `cost-byoi` stayed `Terminating` after
+`kubectl delete ns`.
+
+**Problem:** The CR finalizer
+`costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
+is required: ConsoleLink and Kruize ClusterRole/Binding are cluster-scoped, so
+they cannot use `ownerReferences`. `reconcileDelete()` deletes those objects
+then strips the finalizer. That path is correct **when the CR is deleted and
+the manager is still running**.
+
+OwnNamespace puts the manager Deployment in the **same namespace as the CR**.
+Deleting the namespace (or tearing down the operator CSV/Deployment first)
+kills the operator pod before it can process the CR's `deletionTimestamp`.
+The finalizer is never removed.
+
+Observed on clusterbot:
+
+- Namespace condition `NamespaceFinalizersRemaining`:
+  `costmanagementserviceconfigs.service.costmanagement.openshift.io/cleanup`
+  on 1 resource
+- `NamespaceContentRemaining`: the CMSC instance still present
+- Operator pods already gone (`No resources found`)
+- ConsoleLink `cost-management-cost-management` still present (cluster leak)
+
+Unstick: patch `metadata.finalizers: []` on the CMSC and delete the ConsoleLink.
+The namespace then finished terminating in seconds.
+
+**Impact:** Medium for lab/uninstall. Any `oc delete ns <cr-ns>`, Cluster Bot
+teardown, or OLM uninstall that removes the operator before the CR will leave
+the namespace stuck and leak ConsoleLink (and Kruize cluster RBAC if ROS was
+enabled). Production uninstall without a documented CR-first procedure hits
+the same trap. Not a bug in `reconcileDelete` itself.
+
+**Suggested fix (in order):**
+
+1. **Document uninstall order** (pre-prod / ownnamespace / OLM): delete the
+   `CostManagementServiceConfig`, wait until it is gone, *then* delete the
+   namespace or the operator. Lab `--reset` must do the same while the
+   operator is still Available; only strip the finalizer if the operator is
+   already gone.
+2. **OLM / COST-7695:** uninstall bundle should delete (or block on) the CR
+   before removing the CSV. AllNamespaces / a dedicated operator namespace
+   would also avoid killing the manager when the operand namespace is deleted.
+3. Optional hardening (probably not worth it for beta): a webhook that warns
+   or blocks namespace deletion while a CMSC with this finalizer exists.
+
+**Not a COST-7688 gap** — surfaced while exercising the pre-prod path on this
+branch.
+
+---
+
+## 11. `jwksProbe` ignores `caCertSecretName` — false `AuthenticationReady: False`
+
+**Source:** PR #74 review (Jordi)
+
+**Problem:** `jwksProbe` (validation.go:195) builds its TLS transport from
+Go's default cert pool and only honours `insecureSkipVerify`. When a user
+sets `spec.authentication.keycloak.tls.caCertSecretName` for an internal
+Keycloak with a self-signed or private CA, Envoy gets the CA mounted via
+`/ca-extra` and validates JWKS fine — but the operator's own health probe
+uses a different TLS path and reports `AuthenticationReady: False /
+OIDCUnreachable` even though authentication works end-to-end.
+
+**Concrete failure mode:** user has a real CA, sets `caCertSecretName`,
+does NOT set `insecureSkipVerify` (correctly — they have a proper CA).
+Envoy works. Operator says auth is broken.
+
+**Fix:** Thread the CA secret into `jwksProbe` — read the Secret, load
+certs into a `tls.Config.RootCAs` pool, pass the custom transport.
+Requires Secrets read RBAC in the validation phase.
+
+**Workaround:** set `insecureSkipVerify: true` alongside `caCertSecretName`
+to suppress the false negative (Envoy still validates properly with the
+mounted CA).

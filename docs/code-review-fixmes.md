@@ -9,11 +9,13 @@ gap-analysis notes (for example D11, D18, D20, F3, F4).
 
 #### 1. Ready ignores most workload health [D1]
 
-Only 4 resources are readiness-gated: Database StatefulSet, Cache Deployment,
-Koku API Deployment, and Envoy Deployment. Everything else — Masu, Listener,
-Celery, all ROS deployments, RBAC API/Worker, Kruize, Ingress, UI — is applied
-without readiness checks. A bad image on any of those leaves the CR reporting
-`Available=True` with zero running replicas.
+Only 4 resources were readiness-gated at the 2026-08-15 audit: Database
+StatefulSet, Cache Deployment, Koku API Deployment, and Envoy Deployment.
+**RBAC API is now gated** (`RBACReady` / `WaitingForRBAC` before `Available`;
+COST-7689 G2). Everything else — Masu, Listener, Celery, all ROS deployments,
+RBAC worker, Kruize, Ingress, UI — is still applied without readiness checks.
+A bad image on any of those leaves the CR reporting `Available=True` with zero
+running replicas.
 
 #### 2. Progressing status causes a continuous reconcile loop [D2]
 
@@ -22,11 +24,10 @@ refreshes `LastTransitionTime`, so the status patch differs from what was read.
 No generation-change predicate on the primary watch, so the status update
 re-enqueues immediately. The 5-minute drift interval is effectively bypassed.
 
-#### 3. Failed OIDC check overwritten with success [D3]
+#### 3. Failed OIDC check overwritten with success [D3] — **closed**
 
-Validation sets `AuthenticationReady=False` when JWKS is unreachable.
-`reconcileEdge` later unconditionally sets it `True` when the Envoy Deployment
-and Route exist. A dead Keycloak can finish a pass as `AuthReady=True`.
+Edge writes `GatewayReady`. Validation keeps `AuthenticationReady` for the
+JWKS probe. See [COST-7688](gap_analysis/COST-7688.md).
 
 #### 4. Rollout readiness accepts stale replicas [D14]
 
