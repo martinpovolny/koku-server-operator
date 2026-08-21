@@ -73,9 +73,9 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 
 		// Logging configuration (match chart defaults)
 		EnvVal("GUNICORN_LOG_LEVEL", "INFO"),
-		EnvVal("KOKU_LOG_LEVEL", "INFO"),
 		EnvVal("DJANGO_LOG_LEVEL", "INFO"),
 		EnvVal("DJANGO_LOG_FORMATTER", "simple"),
+		EnvVal("DJANGO_LOG_HANDLERS", "console"),
 
 		// Feature flags and tunables (match chart defaults)
 		EnvVal("DEVELOPMENT", "False"),
@@ -97,11 +97,6 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 
 	// Celery result expiry (default 28800 = 8 hours)
 	env = append(env, EnvVal("CELERY_RESULT_EXPIRES", "28800"))
-
-	// Default to console-only logging. The koku settings.py configures a file
-	// handler; setting this env var overrides which handlers loggers use so
-	// Django doesn't try to write logs to the (read-only) container filesystem.
-	env = append(env, EnvVal("DJANGO_LOG_HANDLERS", "console"))
 
 	// Kafka SASL (BYOI secured Kafka)
 	if cfg.Spec.Kafka.SASL.Mechanism != "" {
