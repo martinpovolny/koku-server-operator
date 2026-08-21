@@ -70,6 +70,29 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		EnvVal("RBAC_SERVICE_PATH", "/api/rbac/v1/access/"),
 		EnvVal("RBAC_SERVICE_PROTOCOL", "http"),
 		EnvVal("ENHANCED_ORG_ADMIN", "False"),
+
+		// Logging configuration (match chart defaults)
+		EnvVal("GUNICORN_LOG_LEVEL", "INFO"),
+		EnvVal("KOKU_LOG_LEVEL", "INFO"),
+		EnvVal("DJANGO_LOG_LEVEL", "INFO"),
+		EnvVal("DJANGO_LOG_FORMATTER", "simple"),
+
+		// Feature flags and tunables (match chart defaults)
+		EnvVal("DEVELOPMENT", "False"),
+		EnvVal("KOKU_ENABLE_SENTRY", "False"),
+		EnvVal("CACHED_VIEWS_DISABLED", "False"),
+		EnvVal("NOTIFICATION_CHECK_TIME", "24"),
+		EnvVal("RBAC_CACHE_TIMEOUT", "300"),
+		EnvVal("CACHE_TIMEOUT", "3600"),
+		EnvVal("TAG_ENABLED_LIMIT", "200"),
+		EnvVal("USE_READREPLICA", "False"),
+
+		// Celery polling timer (default 24h = 86400s)
+		EnvVal("POLLING_TIMER", "86400"),
+
+		// Initial ingest configuration
+		EnvVal("INITIAL_INGEST_NUM_MONTHS", "2"),
+		EnvVal("INITIAL_INGEST_OVERRIDE", "False"),
 	}
 
 	// Celery result expiry (default 28800 = 8 hours)
