@@ -296,7 +296,7 @@ func TestKokuCommonEnvSharedDefaults(t *testing.T) {
 		"CACHE_TIMEOUT":             "3600",
 		"TAG_ENABLED_LIMIT":         "200",
 		"USE_READREPLICA":           "False",
-		"POLLING_TIMER":             "86400",
+		"POLLING_TIMER":             "300",
 		"INITIAL_INGEST_NUM_MONTHS": "2",
 		"INITIAL_INGEST_OVERRIDE":   "False",
 		"CELERY_RESULT_EXPIRES":     "28800",

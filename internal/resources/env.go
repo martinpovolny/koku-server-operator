@@ -87,8 +87,8 @@ func KokuCommonEnv(cfg *costv1alpha1.CostManagementServiceConfig) []corev1.EnvVa
 		EnvVal("TAG_ENABLED_LIMIT", "200"),
 		EnvVal("USE_READREPLICA", "False"),
 
-		// Celery polling timer (default 24h = 86400s)
-		EnvVal("POLLING_TIMER", "86400"),
+		// Celery polling timer (match chart default: 300 = 5min)
+		EnvVal("POLLING_TIMER", "300"),
 
 		// Initial ingest configuration
 		EnvVal("INITIAL_INGEST_NUM_MONTHS", "2"),
